@@ -1,5 +1,7 @@
 # Entorno virtual
 .venv/
+.FP_env/
+FP_env
 
 # Python
 __pycache__/
