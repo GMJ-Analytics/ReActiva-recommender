@@ -1,0 +1,27 @@
+﻿variable,tipo_detectado,nulos,porcentaje_nulos,valores_unicos,ejemplo,descripcion
+Transaction ID,str,0,0.0,10000,TXN500000,Identificador unico de la transaccion.
+Customer ID,str,0,0.0,3291,CUST001440,Identificador del cliente.
+Purchase Date,str,0,0.0,730,2023-07-22,Fecha en la que se realizo la compra.
+Age,int64,0,0.0,47,52,Edad del cliente.
+Gender,str,0,0.0,3,Other,Genero informado del cliente.
+Location,str,0,0.0,20,Indore,Ubicacion geografica asociada al cliente o compra.
+Online/Offline,str,0,0.0,2,Offline,Canal en el que se realizo la compra.
+Online Store,str,0,0.0,7,In-Store Purchase,Tienda online utilizada. Para compras offline se registra In-Store Purchase.
+Category,str,0,0.0,3,Clothing,Categoria general del producto comprado.
+Item Purchased,str,0,0.0,24,Jeans,Producto adquirido por el cliente.
+Brand,str,0,0.0,17,Levis,Marca del producto comprado.
+Color,str,0,0.0,10,Black,Color del producto.
+Size,str,0,0.0,13,L,Talle o tamaño del producto.
+Quantity,int64,0,0.0,4,1,Cantidad de unidades compradas en la transaccion.
+Purchase Amount (₹),int64,0,0.0,6611,2215,Importe total de la compra expresado en rupias.
+Discount (%),int64,0,0.0,60,6,Porcentaje de descuento aplicado a la compra.
+Festival/Sale,str,0,0.0,9,Standard Day,Evento comercial o tipo de promocion asociado a la compra.
+Shipping Charge (₹),int64,0,0.0,4,0,Costo de envio expresado en rupias.
+Delivery Speed,str,0,0.0,4,N/A (Offline),Modalidad o velocidad de entrega. Para compras offline se utiliza N/A (Offline).
+Delivery Time (Days),int64,0,0.0,8,0,Cantidad de dias requeridos para la entrega.
+Subscription Status,str,0,0.0,2,No,Indica si el cliente posee una suscripcion activa.
+Payment Method,str,0,0.0,7,Credit Card,Metodo utilizado para realizar el pago.
+Review Rating,int64,0,0.0,5,5,Calificacion de la compra o producto.
+Return Status,str,0,0.0,2,Not Returned,Indica si la compra fue devuelta.
+Previous Purchases,int64,0,0.0,81,2,Cantidad de compras anteriores registradas.
+Frequency of Purchases,str,0,0.0,5,Quarterly,Frecuencia declarada o categorizada de compra.
