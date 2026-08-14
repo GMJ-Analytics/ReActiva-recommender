@@ -21,3 +21,6 @@ Desarrollar un sistema inteligente que permita:
 ## Estado
 
 Proyecto en etapa inicial de configuración y preparación del repositorio.
+
+pyproject.toml > archivo para la instalación del module reactivate |     
+                                                                   |_ una vez se decarguen los archivos en local ejecutar en la terminar pip install e . esto permitira importar load_data.py desde cualquier lugar del proyecto debido a que reactiva estará instaldo en el env
