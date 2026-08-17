@@ -1,12 +1,12 @@
 import numpy as np
 import pandas as pd
-from config import DATASET_URI
 from collections import defaultdict
+from reactiva.data.load_data import cargar_datos
 import s3fs
 from sklearn.metrics.pairwise import cosine_similarity
 from sklearn.feature_extraction.text import TfidfVectorizer
 
-df = pd.read_csv(DATASET_URI)
+df = cargar_datos()
 
 
 #preprocesamiento puede reemplazarse con el file feature_engineering#
@@ -52,8 +52,8 @@ def user_recomendation(user):
         similarity_df[user]
         .drop(user)
         .sort_values(ascending=False).head(5))
-        for user,l in top5.items():
-            if user not in df_sessio_to_predict.values:
+        for similar_user,similarity_score in top5.items():
+            if similar_user not in df_sessio_to_predict['Customer ID'].values:
                 continue
             else:
                 user_dict[user] = df_sessio_to_predict[df_sessio_to_predict['Customer ID']== user]
