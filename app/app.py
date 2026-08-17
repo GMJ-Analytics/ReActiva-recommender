@@ -7,7 +7,8 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 from dotenv import load_dotenv
-from src.reactiva.config import AWS_REGION, DATASET_URI, S3_BUCKET, USUARIO_ADMIN, PASSWORD_ADMIN
+from src.reactiva.config import AWS_REGION, S3_BUCKET, USUARIO_ADMIN, PASSWORD_ADMIN
+from src.reactiva.data.load_data import cargar_datos
 from src.reactiva.utils.logger import log_event, setup_logger
 from src.reactiva.recommender.recommend import user_recomendation
 from src.reactiva.data.validate_data import FULL_DEFAULT_STRATEGY, DataValidator
@@ -59,11 +60,11 @@ CAMPOS_SOLO_ONLINE = [
 
 #valores con los que se completan esos campos cuando la venta es offline
 DEFAULTS_OFFLINE = {
-    'Online Store': 'N/A',
+    'Online Store': 'In-Store Purchase',
     'Shipping Charge (₹)': 0,
-    'Delivery Speed': 'In Store',
+    'Delivery Speed': 'N/A (Offline)',
     'Delivery Time (Days)': 0,
-    'Review Rating': 0,
+    'Review Rating': np.nan,
 }
 
 
@@ -95,15 +96,13 @@ DIAS_CHURN = 270  # mismo corte que usa el recomendador
 
 #funciones para la estructura de la pagina:
 
-@st.cache_data(show_spinner='Leyendo dataset historico...')
+@st.cache_data(show_spinner="Leyendo dataset historico...")
 def cargar_dataset() -> pd.DataFrame:
-    """Lee el dataset y normaliza la fecha."""
-    try:
-        df = pd.read_csv(DATASET_URI)
-    except Exception as e:
-        print('No se pudo cargar el dataset en la nube, intentando conexion con el respaldo local.')
-        df = pd.read_csv("src/reactiva/customer_shopping_behavior.csv")
-    df['Purchase Date'] = pd.to_datetime(df['Purchase Date'], errors='coerce')
+    df = cargar_datos().copy()
+    df["Purchase Date"] = pd.to_datetime(
+        df["Purchase Date"], 
+        errors="coerce"
+    )
     return df
 
 
@@ -453,7 +452,6 @@ with tabs[0]:
             'Category': category,
             'Item Purchased': item_purchased,
             'Brand': brand,
-            'session': temporada,
         }
         record.update(operativos)
 
@@ -463,7 +461,7 @@ with tabs[0]:
         log_event(
             logger,
             'Indexacion individual recibida',
-            customer_id=int(customer_id),
+            customer_id=customer_id,
             transaction_id=transaction_id,
             modo=modo,
         )
@@ -509,11 +507,11 @@ with tabs[0]:
             if recomendacion:
                 st.success(recomendacion)
                 log_event(logger, 'Recomendacion generada',
-                          customer_id=int(customer_id), fuente='colaborativo')
+                          customer_id=customer_id, fuente='colaborativo')
             else:
                 st.warning(aviso)
                 log_event(logger, 'Recomendacion no disponible', level=30,
-                          customer_id=int(customer_id), motivo=aviso)
+                          customer_id=customer_id, motivo=aviso)
 
         elif df_historico is not None:
             sugerencias = recomendar_por_perfil(df_historico, record)
@@ -521,7 +519,7 @@ with tabs[0]:
             if sugerencias.empty:
                 st.warning('No hay clientes comparables para este perfil.')
                 log_event(logger, 'Cold start sin resultados', level=30,
-                          customer_id=int(customer_id))
+                          customer_id=customer_id)
             else:
                 st.caption(
                     f'Perfiles similares en {location}, temporada {temporada}:'
@@ -530,11 +528,11 @@ with tabs[0]:
                     st.info(f'• {item} — {veces} compras de perfiles parecidos')
 
                 log_event(logger, 'Recomendacion generada',
-                          customer_id=int(customer_id), fuente='cold_start',
+                          customer_id=customer_id, fuente='cold_start',
                           items=len(sugerencias))
 
 
-#TAB 2 - carga masiva
+# TAB 2 - carga masiva
 with tabs[1]:
     st.header('Carga mensual de transacciones a la Base de Datos')
     st.write('El archivo se valida antes de guardarse.')
@@ -542,14 +540,26 @@ with tabs[1]:
     uploaded_file = st.file_uploader('Archivo mensual de ventas', type=['csv'])
 
     if uploaded_file is not None:
+        archivo_actual = (uploaded_file.name, uploaded_file.size)
+
+        if st.session_state.get('archivo_actual') != archivo_actual:
+            st.session_state['archivo_actual'] = archivo_actual
+            st.session_state.pop('df_clean', None)
+            st.session_state.pop('clean_log', None)
+            st.session_state.pop('upload_success', None)
+
         try:
             if uploaded_file.name.endswith('.csv'):
                 df_upload = pd.read_csv(uploaded_file)
             else:
                 df_upload = pd.read_excel(uploaded_file)
 
-            log_event(logger, 'Archivo cargado por el usuario',
-                      filename=uploaded_file.name, rows=len(df_upload))
+            log_event(
+                logger, 
+                'Archivo cargado por el usuario',
+                filename=uploaded_file.name, 
+                rows=len(df_upload)
+            )
 
             st.write(
                 f'📁 **{uploaded_file.name}** — {len(df_upload)} filas, '
@@ -568,8 +578,12 @@ with tabs[1]:
 
             if report['missing_columns']:
                 st.error(f'❌ Faltan columnas requeridas: {report["missing_columns"]}')
-                log_event(logger, 'Archivo rechazado', level=40,
-                          columnas=report['missing_columns'])
+                log_event(
+                    logger, 
+                    'Archivo rechazado', 
+                    level=40,
+                    columnas=report['missing_columns']
+                )
                 st.stop()
 
             st.success('✅ Estructura de columnas valida.')
@@ -583,12 +597,11 @@ with tabs[1]:
             if nulos.empty:
                 st.success('Sin nulos en el archivo.')
             else:
-                st.dataframe(nulos, width='stretch')
+                st.dataframe(nulos, use_container_width=True)
 
             st.subheader('🧹 Fase 2: limpieza e imputacion')
 
-            forzar = st.checkbox(
-                'Imputar aunque la columna supere el 15% de nulos',)
+            forzar = st.checkbox('Imputar aunque la columna supere el 15% de nulos')
 
             if st.button('Ejecutar limpieza', type='secondary'):
                 buffer = io.StringIO()
@@ -600,10 +613,15 @@ with tabs[1]:
 
                 st.session_state['df_clean'] = df_clean
                 st.session_state['clean_log'] = validator.get_log()
+                st.session_state.pop('upload_success', None)
 
-                log_event(logger, 'Limpieza ejecutada',
-                          rows_before=len(df_upload), rows_after=len(df_clean),
-                          forzado=forzar)
+                log_event(
+                    logger, 
+                    'Limpieza ejecutada',
+                    rows_before=len(df_upload), 
+                    rows_after=len(df_clean),
+                    forzado=forzar
+                )
 
             if 'df_clean' in st.session_state:
                 df_clean = st.session_state['df_clean']
@@ -611,8 +629,11 @@ with tabs[1]:
 
                 c1, c2 = st.columns(2)
                 c1.metric('Filas antes', len(df_upload))
-                c2.metric('Filas despues', len(df_clean),
-                          delta=len(df_clean) - len(df_upload))
+                c2.metric(
+                    'Filas despues', 
+                    len(df_clean),
+                    delta=len(df_clean) - len(df_upload)
+                )
 
                 bloqueadas = [linea for linea in clean_log if 'BLOCKED' in linea]
                 if bloqueadas:
@@ -621,7 +642,7 @@ with tabs[1]:
                         'y quedaron sin imputar.'
                     )
 
-                st.dataframe(df_clean.head(10), width='stretch')
+                st.dataframe(df_clean.head(10), use_container_width=True)
 
                 with st.expander('Log de cambios e imputaciones'):
                     for linea in clean_log:
@@ -630,14 +651,20 @@ with tabs[1]:
                 st.markdown('---')
                 st.subheader('☁️ Fase 3: subida a la base de datos')
 
-                if st.button('📤 Subir dataset limpio', type='primary'):
-                    with st.spinner('Guardando en Base de Datos...'):
-                        s3_key = upload_df_to_s3(df_clean, S3_BUCKET)
+                # Persistencia del estado de subida exitosa
+                if st.session_state.get('upload_success'):
+                    st.success(f'🎉 {st.session_state["upload_success"]}')
+                else:
+                    if st.button('📤 Subir dataset limpio', type='primary'):
+                        with st.spinner('Guardando en Base de Datos...'):
+                            s3_key = upload_df_to_s3(df_clean, S3_BUCKET)
 
-                    if s3_key:
-                        st.success(f'🎉 Subido a la Base de Datos')
-                    else:
-                        st.error('⚠️ Fallo la subida. Reintente o comuniquese con el soporte.')
+                        if s3_key:
+                            msg = f'Subido exitosamente a la Base de Datos ({s3_key})'
+                            st.session_state['upload_success'] = msg
+                            st.success(f'🎉 {msg}')
+                        else:
+                            st.error('⚠️ Fallo la subida. Reintente o comuniquese con el soporte.')
 
         except Exception as error:
             st.error(f'Error al procesar el archivo: {error}')
@@ -667,14 +694,14 @@ with tabs[2]:
             f3.metric('Ordenes', datos['compras'])
             f4.metric('Categoria preferida', datos['categoria'])
             f5.metric(
-                'Riesgo de churn',
+                'Actividad',
                 datos['churn'],
                 delta=f'{datos["dias_inactivo"]} dias sin comprar',
                 delta_color='inverse' if datos['churn'] == 'Alto' else 'normal',
             )
 
             t_hist, t_cross, t_camp, t_notas = st.tabs(
-                ['Historial', 'Cross-selling', 'Campanias', 'Notas CRM']
+                ['Historial', 'Cross-selling', 'Campañas', 'Notas CRM']
             )
 
             with t_hist:
@@ -700,7 +727,7 @@ with tabs[2]:
                     st.info('El cliente ya compro todo el catalogo de su categoria.')
                 else:
                     for item, veces in candidatos.items():
-                        st.write(f'- Ofrecer **{item}** ({veces} compras de clientes similares)')
+                        st.write(f'- Ofrecer **{item}** ({veces} compras similares)')
 
                 st.divider()
                 st.caption('Salida del recomendador colaborativo:')
