@@ -9,6 +9,10 @@ from reactiva.data.load_data import cargar_datos
 DESCRIPCIONES_COLUMNAS = {
     "Transaction ID": "Identificador unico de la transaccion.",
     "Customer ID": "Identificador del cliente.",
+    "Customer Full Name": ("Nombre y apellido asociados al cliente para su identificacion."
+    ),
+    "Customer Email": ("Correo electronico asociado al cliente para acciones de reactivacion."
+    ),
     "Purchase Date": "Fecha en la que se realizo la compra.",
     "Age": "Edad del cliente.",
     "Gender": "Genero informado del cliente.",
@@ -42,9 +46,6 @@ DESCRIPCIONES_COLUMNAS = {
     "Review Rating": "Calificacion de la compra o producto.",
     "Return Status": "Indica si la compra fue devuelta.",
     "Previous Purchases": "Cantidad de compras anteriores registradas.",
-    "Frequency of Purchases": (
-        "Frecuencia declarada o categorizada de compra."
-    ),
 }
 
 # ============================================================
