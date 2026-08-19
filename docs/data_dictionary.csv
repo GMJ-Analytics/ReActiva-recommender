@@ -1,6 +1,8 @@
 ﻿variable,tipo_detectado,nulos,porcentaje_nulos,valores_unicos,ejemplo,descripcion
 Transaction ID,str,0,0.0,10000,TXN500000,Identificador unico de la transaccion.
 Customer ID,str,0,0.0,3291,CUST001440,Identificador del cliente.
+Customer Full Name,str,0,0.0,790,Manish Kapoor,Nombre y apellido asociados al cliente para su identificacion.
+Customer Email,str,0,0.0,3291,manish.kapoor.cust001440@reactiva.example,Correo electronico asociado al cliente para acciones de reactivacion.
 Purchase Date,str,0,0.0,730,2023-07-22,Fecha en la que se realizo la compra.
 Age,int64,0,0.0,47,52,Edad del cliente.
 Gender,str,0,0.0,3,Other,Genero informado del cliente.
@@ -24,4 +26,3 @@ Payment Method,str,0,0.0,7,Credit Card,Metodo utilizado para realizar el pago.
 Review Rating,int64,0,0.0,5,5,Calificacion de la compra o producto.
 Return Status,str,0,0.0,2,Not Returned,Indica si la compra fue devuelta.
 Previous Purchases,int64,0,0.0,81,2,Cantidad de compras anteriores registradas.
-Frequency of Purchases,str,0,0.0,5,Quarterly,Frecuencia declarada o categorizada de compra.

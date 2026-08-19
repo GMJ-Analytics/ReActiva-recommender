@@ -14,11 +14,27 @@ Usage:
     df_clean = validator.clean(strategy=FULL_DEFAULT_STRATEGY)
 """
 
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 
+from reactiva.data.audit_data import auditar_consistencia_canal
+from reactiva.data.save_results import save_to_local
+
 
 REQUIRED_COLUMNS = ['Customer ID', 'Item Purchased', 'Category', 'Purchase Date']
+
+NUMERIC_VALID_RANGES = {
+    'Age': (15, 100),
+    'Quantity': (1, None),
+    'Purchase Amount (₹)': (0, None),
+    'Discount (%)': (0, 100),
+    'Shipping Charge (₹)': (0, None),
+    'Delivery Time (Days)': (0, None),
+    'Review Rating': (1, 5),
+    'Previous Purchases': (0, None),
+}
 
 # Default strategy covering every column in the 27-column schema.
 # Identifiers / fields needed for modeling logic -> drop_row (can't recover these).
@@ -27,6 +43,8 @@ REQUIRED_COLUMNS = ['Customer ID', 'Item Purchased', 'Category', 'Purchase Date'
 FULL_DEFAULT_STRATEGY = {
     'Transaction ID':          'drop_row',
     'Customer ID':             'drop_row',
+    'Customer Full Name':      'skip',
+    'Customer Email':          'skip',
     'Purchase Date':           'drop_row',
     'Age':                     'median',
     'Gender':                  'mode',
@@ -50,7 +68,6 @@ FULL_DEFAULT_STRATEGY = {
     'Review Rating':           'median',
     'Return Status':           'mode',
     'Previous Purchases':      'median',
-    'Frequency of Purchases':  'mode',
     'session':                 'drop_row',
 }
 
@@ -86,6 +103,8 @@ class DataValidator:
             'category_cardinality': self._check_cardinality('Category'),
             'item_cardinality': self._check_cardinality('Item Purchased'),
             'orphan_customers': self._check_orphans(),
+            'channel_consistency': self._check_channel_consistency(),
+            'range_issues': self._check_numeric_ranges(),
         }
         return report
 
@@ -102,10 +121,19 @@ class DataValidator:
         return (self.df.isnull().sum() / n * 100).round(2).to_dict()
 
     def _check_duplicate_keys(self):
-        """Exact duplicate transactions: same customer, item, date."""
-        keys = [c for c in ['Customer ID', 'Item Purchased', 'Purchase Date'] if c in self.df.columns]
+        """Duplicate transactions using Transaction ID, customer, item and date."""
+        if 'Transaction ID' not in self.df.columns:
+            return None
+
+        keys = [
+            c for c in
+            ['Transaction ID', 'Customer ID', 'Item Purchased', 'Purchase Date']
+            if c in self.df.columns
+        ]
+
         if len(keys) < 2:
             return None
+
         return int(self.df.duplicated(subset=keys).sum())
 
     def _check_dates(self):
@@ -146,6 +174,54 @@ class DataValidator:
         counts = self.df['Customer ID'].value_counts()
         return int((counts == 1).sum())
 
+    def _check_channel_consistency(self):
+        """Reuse channel-consistency rules defined in the data audit."""
+        required = [
+            'Online/Offline',
+            'Online Store',
+            'Delivery Speed',
+            'Shipping Charge (₹)',
+            'Delivery Time (Days)',
+        ]
+
+        if any(col not in self.df.columns for col in required):
+            return None
+
+        return auditar_consistencia_canal(self.df)
+
+    def _check_numeric_ranges(self):
+        """
+        Detect values outside defined validity ranges without modifying data.
+
+        Statistical outliers are not treated as invalid values here.
+        """
+        issues = {}
+
+        for col, (minimum, maximum) in NUMERIC_VALID_RANGES.items():
+            if col not in self.df.columns:
+                continue
+
+            values = pd.to_numeric(self.df[col], errors='coerce')
+
+            below_min = (
+                int((values < minimum).sum())
+                if minimum is not None
+                else 0
+            )
+
+            above_max = (
+                int((values > maximum).sum())
+                if maximum is not None
+                else 0
+            )
+
+            issues[col] = {
+                'below_min': below_min,
+                'above_max': above_max,
+            }
+
+        return issues
+
     def print_report(self, report: dict = None):
         report = report or self.run_checks()
         print('=' * 60)
@@ -163,7 +239,10 @@ class DataValidator:
         if all(report['null_counts'].get(c, 0) == 0 for c in self.df.columns):
             print('  none')
         print(f"\nDuplicate rows (all columns identical): {report['duplicate_rows']}")
-        print(f"Duplicate (Customer ID, Item, Date) rows: {report['duplicate_key_rows']}")
+        print(
+            f"Duplicate (Transaction ID, Customer ID, Item, Date) rows: "
+            f"{report['duplicate_key_rows']}"
+        )
         print(f"\nDate issues: {report['date_issues']}")
         print(f"Customer ID sanity (invalid/empty count): {report['negative_or_zero_ids']}")
         print(f"\nCategory cardinality: {report['category_cardinality']}")
@@ -174,8 +253,16 @@ class DataValidator:
     # ------------------------------------------------------------------ #
     # Cleaning / imputation
     # ------------------------------------------------------------------ #
-    def clean(self, strategy: dict, dedupe_exact=True, dedupe_keys=True, parse_dates=True,
-              high_null_threshold=15.0, force_impute_above_threshold=False):
+    def clean(
+        self,
+        strategy: dict,
+        dedupe_exact=True,
+        dedupe_keys=True,
+        parse_dates=True,
+        normalize_text=True,
+        high_null_threshold=15.0,
+        force_impute_above_threshold=False,
+    ):
         """
         strategy: dict mapping column -> one of:
             'drop_row'    : drop rows where this column is null
@@ -185,6 +272,10 @@ class DataValidator:
             'ffill'       : forward-fill (useful for time-ordered data per customer)
             'constant:X'  : impute with a fixed value X, e.g. 'constant:Unknown'
             'skip'        : leave nulls as-is (explicit opt-out)
+
+        normalize_text: if True, removes surrounding whitespace from string
+            values without changing capitalization or internal content.
+            Default True.
 
         high_null_threshold: max null % (0-100) a column may have before an
             imputation strategy (mode/mean/median/ffill/constant) is BLOCKED
@@ -202,13 +293,41 @@ class DataValidator:
         self.log = []
         n_rows = len(df)
 
+        if normalize_text:
+            normalized_values = 0
+
+            for col in df.columns:
+                if (
+                    pd.api.types.is_object_dtype(df[col])
+                    or pd.api.types.is_string_dtype(df[col])
+                ):
+                    string_mask = df[col].map(lambda value: isinstance(value, str))
+
+                    if not string_mask.any():
+                        continue
+
+                    before = df.loc[string_mask, col]
+                    after = before.str.strip()
+                    changed = int((before != after).sum())
+
+                    if changed > 0:
+                        df.loc[string_mask, col] = after
+                        normalized_values += changed
+
+            self._record(
+                f"Normalized surrounding whitespace in text columns. "
+                f"{normalized_values} value(s) changed."
+            )
+
         if parse_dates and 'Purchase Date' in df.columns:
             before_na = df['Purchase Date'].isnull().sum()
             df['Purchase Date'] = pd.to_datetime(df['Purchase Date'], errors='coerce')
             after_na = df['Purchase Date'].isnull().sum()
             newly_unparseable = after_na - before_na
-            self._record(f"Parsed 'Purchase Date' to datetime. "
-                          f"{newly_unparseable} additional value(s) became NaT (unparseable).")
+            self._record(
+                f"Parsed 'Purchase Date' to datetime. "
+                f"{newly_unparseable} additional value(s) became NaT (unparseable)."
+            )
 
         for col, action in strategy.items():
             if col not in df.columns:
@@ -224,7 +343,11 @@ class DataValidator:
             is_imputation_action = action in ('mode', 'mean', 'median', 'ffill') or \
                 (isinstance(action, str) and action.startswith('constant:'))
 
-            if is_imputation_action and null_pct > high_null_threshold and not force_impute_above_threshold:
+            if (
+                is_imputation_action
+                and null_pct > high_null_threshold
+                and not force_impute_above_threshold
+            ):
                 self._record(
                     f"'{col}': {null_before} null(s) ({null_pct:.1f}%) EXCEEDS "
                     f"{high_null_threshold}% threshold — imputation strategy '{action}' BLOCKED. "
@@ -233,7 +356,11 @@ class DataValidator:
                 )
                 continue
 
-            if is_imputation_action and null_pct > high_null_threshold and force_impute_above_threshold:
+            if (
+                is_imputation_action
+                and null_pct > high_null_threshold
+                and force_impute_above_threshold
+            ):
                 self._record(
                     f"'{col}': {null_before} null(s) ({null_pct:.1f}%) exceeds "
                     f"{high_null_threshold}% threshold — imputing anyway (forced override)."
@@ -249,40 +376,59 @@ class DataValidator:
                     continue
                 fill_value = df[col].mode().iloc[0]
                 df[col] = df[col].fillna(fill_value)
-                self._record(f"'{col}': imputed {null_before} null(s) with mode ('{fill_value}').")
+                self._record(
+                    f"'{col}': imputed {null_before} null(s) with mode ('{fill_value}')."
+                )
 
             elif action == 'mean':
                 if not pd.api.types.is_numeric_dtype(df[col]):
-                    self._record(f"'{col}': 'mean' requested on non-numeric column — skipped.")
+                    self._record(
+                        f"'{col}': 'mean' requested on non-numeric column — skipped."
+                    )
                     continue
                 fill_value = df[col].mean()
                 df[col] = df[col].fillna(fill_value)
-                self._record(f"'{col}': imputed {null_before} null(s) with mean ({fill_value:.2f}).")
+                self._record(
+                    f"'{col}': imputed {null_before} null(s) with mean ({fill_value:.2f})."
+                )
 
             elif action == 'median':
                 if not pd.api.types.is_numeric_dtype(df[col]):
-                    self._record(f"'{col}': 'median' requested on non-numeric column — skipped.")
+                    self._record(
+                        f"'{col}': 'median' requested on non-numeric column — skipped."
+                    )
                     continue
                 fill_value = df[col].median()
                 df[col] = df[col].fillna(fill_value)
-                self._record(f"'{col}': imputed {null_before} null(s) with median ({fill_value:.2f}).")
+                self._record(
+                    f"'{col}': imputed {null_before} null(s) with median ({fill_value:.2f})."
+                )
 
             elif action == 'ffill':
-                sort_cols = [c for c in ['Customer ID', 'Purchase Date'] if c in df.columns]
+                sort_cols = [
+                    c for c in ['Customer ID', 'Purchase Date']
+                    if c in df.columns
+                ]
                 if sort_cols:
                     df = df.sort_values(sort_cols)
                 df[col] = df[col].ffill()
                 remaining = df[col].isnull().sum()
-                self._record(f"'{col}': forward-filled {null_before - remaining} null(s); "
-                              f"{remaining} remain null (leading nulls with no prior value).")
+                self._record(
+                    f"'{col}': forward-filled {null_before - remaining} null(s); "
+                    f"{remaining} remain null (leading nulls with no prior value)."
+                )
 
             elif isinstance(action, str) and action.startswith('constant:'):
                 fill_value = action.split(':', 1)[1]
                 df[col] = df[col].fillna(fill_value)
-                self._record(f"'{col}': imputed {null_before} null(s) with constant '{fill_value}'.")
+                self._record(
+                    f"'{col}': imputed {null_before} null(s) with constant '{fill_value}'."
+                )
 
             elif action == 'skip':
-                self._record(f"'{col}': {null_before} null(s) left as-is (explicit skip).")
+                self._record(
+                    f"'{col}': {null_before} null(s) left as-is (explicit skip)."
+                )
 
             else:
                 self._record(f"'{col}': unknown strategy '{action}' — skipped.")
@@ -290,14 +436,29 @@ class DataValidator:
         if dedupe_exact:
             before = len(df)
             df = df.drop_duplicates()
-            self._record(f"Dropped {before - len(df)} fully duplicate row(s).")
+            self._record(
+                f"Dropped {before - len(df)} fully duplicate row(s)."
+            )
 
         if dedupe_keys:
-            keys = [c for c in ['Customer ID', 'Item Purchased', 'Purchase Date'] if c in df.columns]
-            if len(keys) >= 2:
-                before = len(df)
-                df = df.drop_duplicates(subset=keys)
-                self._record(f"Dropped {before - len(df)} duplicate (Customer ID, Item, Date) row(s).")
+            if 'Transaction ID' not in df.columns:
+                self._record(
+                    "Duplicate-key removal skipped: 'Transaction ID' column not found."
+                )
+            else:
+                keys = [
+                    c for c in
+                    ['Transaction ID', 'Customer ID', 'Item Purchased', 'Purchase Date']
+                    if c in df.columns
+                ]
+
+                if len(keys) >= 2:
+                    before = len(df)
+                    df = df.drop_duplicates(subset=keys)
+                    self._record(
+                        f"Dropped {before - len(df)} duplicate "
+                        "(Transaction ID, Customer ID, Item, Date) row(s)."
+                    )
 
         self.df = df
         return df
@@ -310,13 +471,46 @@ class DataValidator:
         return self.log
 
 
+def clean_and_save_dataset(
+    df: pd.DataFrame,
+    output_path,
+    strategy=None,
+) -> pd.DataFrame:
+    """
+    Clean a purchases dataframe and save the reproducible result as CSV.
+
+    The cleaning logic is delegated to DataValidator and the persistence
+    logic is delegated to save_to_local so both behaviours remain centralized.
+    """
+    strategy = strategy or FULL_DEFAULT_STRATEGY
+
+    validator = DataValidator(df)
+    clean_df = validator.clean(strategy=strategy)
+
+    output_path = Path(output_path)
+    save_to_local(
+        clean_df,
+        output_path,
+        is_dataframe=True,
+    )
+
+    return clean_df
+
+
 if __name__ == '__main__':
-    # Minimal smoke test with synthetic data containing intentional issues
+    # Minimal smoke test with sample data containing intentional issues
     sample = pd.DataFrame({
         'Customer ID': [1, 2, 3, None, 5, 5],
         'Item Purchased': ['Kurta', None, 'Saree', 'Jacket', 'Jacket', 'Jacket'],
         'Category': ['Ethnic', 'Ethnic', None, 'Outerwear', 'Outerwear', 'Outerwear'],
-        'Purchase Date': ['2025-01-01', '2025-02-15', 'not-a-date', '2025-03-01', '2025-03-01', '2025-03-01'],
+        'Purchase Date': [
+            '2025-01-01',
+            '2025-02-15',
+            'not-a-date',
+            '2025-03-01',
+            '2025-03-01',
+            '2025-03-01',
+        ],
     })
 
     validator = DataValidator(sample)

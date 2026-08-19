@@ -41,3 +41,24 @@ Proyecto en etapa inicial de configuración y preparación del repositorio.
 
 pyproject.toml > archivo para la instalación del module reactivate |     
                                                                    |_ una vez se decarguen los archivos en local ejecutar en la terminar pip install e . esto permitira importar load_data.py desde cualquier lugar del proyecto debido a que reactiva estará instaldo en el env
+
+## Actualización del dataset
+
+El dataset actual incorpora los campos `Customer Full Name` y `Customer Email` para que el flujo de reactivación pueda identificar al cliente de forma legible y disponer de un medio de contacto.
+
+Estos dos campos fueron incorporados de forma sintética con fines operativos del proyecto:
+
+- `Customer Full Name`: permite identificar al cliente más allá de su `Customer ID`.
+- `Customer Email`: permite representar el canal de contacto necesario para una acción de reactivación.
+
+El esquema actual del dataset contiene 27 columnas y ya no incluye `Frequency of Purchases`.
+
+## Criterio actual de inactividad
+
+El criterio vigente del proyecto para considerar a un cliente inactivo es de **270 días**. Este valor reemplaza el criterio anterior de 180 días mencionado en documentación previa.
+
+## Solución de problemas
+
+Los problemas técnicos confirmados durante el desarrollo, junto con su causa, solución, resultado y medidas de prevención, se documentan en:
+
+[`docs/troubleshooting/README.md`](docs/troubleshooting/README.md)

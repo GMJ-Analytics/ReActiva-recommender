@@ -22,6 +22,15 @@ __pycache__/
 # Logs
 *.log
 
+# Datos locales generados
+data/raw/*
+data/interim/*
+data/processed/*
+
+!data/raw/.gitkeep
+!data/interim/.gitkeep
+!data/processed/.gitkeep
+
 # Sistema operativo
 .DS_Store
 Thumbs.db
