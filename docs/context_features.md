@@ -1,35 +1,90 @@
 # Context features de ReActiva
 
-Este documento describe las variables contextuales implementadas para la Issue #47 y la estrategia utilizada para manejar grupos con poco soporte.
+Este documento describe las variables contextuales utilizadas por ReActiva, su construcción estandarizada y la estrategia implementada en la Issue #47 para manejar segmentos con poco soporte.
 
 ## Objetivo
 
-Incorporar contexto temporal y geográfico de forma reproducible para apoyar rankings de popularidad y futuros fallbacks del recomendador.
+Incorporar contexto temporal y geográfico de forma reproducible para apoyar rankings de popularidad y mecanismos de fallback del recomendador.
 
-La lógica se encuentra implementada en:
+Además, la implementación centraliza la construcción de features derivadas para evitar que notebooks, modelos y componentes productivos mantengan reglas duplicadas o inconsistentes.
+
+La construcción estandarizada de features se encuentra en:
+
+`src/reactiva/features/build_features.py`
+
+La lógica contextual de rankings, soporte y fallback se encuentra en:
 
 `src/reactiva/features/context.py`
 
-## Season_India
+---
 
-La variable `Season_India` se deriva exclusivamente de `Purchase Date`.
+## Feature estandarizada: season
 
-Se utiliza la siguiente clasificación:
+La variable canónica de temporada se denomina:
 
-- `Winter`: diciembre, enero y febrero.
-- `Summer`: marzo, abril y mayo.
-- `Monsoon`: junio, julio, agosto y septiembre.
-- `Post-Monsoon`: octubre y noviembre.
+`season`
 
-La transformación es determinista y no modifica el DataFrame original recibido por la función.
+Se deriva exclusivamente de:
 
-También se normalizan nombres de temporada utilizados previamente en el proyecto, por ejemplo:
+`Purchase Date`
 
-- `winter` → `Winter`
-- `summer` → `Summer`
-- `post-monsoon` → `Post-Monsoon`
+Los valores estandarizados son:
 
-Esto permite mantener compatibilidad con código previo sin modificarlo.
+- `winter`: diciembre, enero y febrero.
+- `summer`: marzo, abril y mayo.
+- `monsoon`: junio, julio, agosto y septiembre.
+- `post-monsoon`: octubre y noviembre.
+
+La regla de construcción se encuentra centralizada en:
+
+`src/reactiva/features/build_features.py`
+
+Las funciones principales son:
+
+- `season_from_month()`
+- `season_from_date()`
+- `add_season()`
+
+Esto evita que distintos notebooks o componentes implementen manualmente su propia clasificación de temporadas.
+
+La transformación es determinista y `add_season()` trabaja sobre una copia del DataFrame recibido.
+
+También se normalizan entradas de temporada cuando es necesario para mantener consistencia con los valores canónicos utilizados por el proyecto.
+
+---
+
+## Feature estandarizada: age_group
+
+La variable canónica de grupo etario se denomina:
+
+`age_group`
+
+Se deriva de:
+
+`Age`
+
+La clasificación estandarizada utilizada por el proyecto es:
+
+- `Young Adult`: edad menor o igual a 25 años.
+- `Adult`: edad mayor a 25 y menor a 65 años.
+- `Old`: edad mayor o igual a 65 años.
+
+La regla se encuentra centralizada en:
+
+`src/reactiva/features/build_features.py`
+
+Las funciones principales son:
+
+- `age_group_from_age()`
+- `add_age_group()`
+
+La función general:
+
+`build_features()`
+
+permite construir de forma conjunta las features derivadas utilizadas por los componentes que necesitan tanto `season` como `age_group`.
+
+---
 
 ## Location
 
@@ -42,20 +97,34 @@ No debe interpretarse como:
 - tienda física;
 - condición meteorológica.
 
-Su objetivo es permitir comparar patrones de compra observados entre ubicaciones del dataset.
+Su objetivo es permitir comparar patrones de compra observados entre ubicaciones presentes en el dataset.
 
-## Rankings de popularidad
+---
 
-El módulo permite construir rankings en cuatro niveles:
+## Rankings de popularidad contextual
+
+El módulo:
+
+`src/reactiva/features/context.py`
+
+permite construir rankings en cuatro niveles:
 
 1. Popularidad global.
-2. Popularidad por `Season_India`.
+2. Popularidad por `season`.
 3. Popularidad por `Location`.
-4. Popularidad por interacción `Season_India + Location`.
+4. Popularidad por interacción `season + Location`.
 
 Cada ranking utiliza la cantidad histórica de compras del producto como señal de popularidad.
 
 En caso de empate, el orden se resuelve de forma determinista por nombre de producto para mantener reproducibilidad.
+
+La construcción de `season` no se redefine dentro de este módulo.
+
+`context.py` consume la feature estandarizada desde:
+
+`src/reactiva/features/build_features.py`
+
+---
 
 ## Soporte mínimo
 
@@ -71,11 +140,13 @@ Si un segmento no alcanza el soporte mínimo, ese nivel contextual no se utiliza
 
 El soporte corresponde actualmente a la cantidad de transacciones disponibles dentro del segmento evaluado.
 
+---
+
 ## Estrategia de fallback
 
 La estrategia implementada sigue este orden:
 
-`Season_India + Location`
+`season + Location`
 
 ↓
 
@@ -83,7 +154,7 @@ La estrategia implementada sigue este orden:
 
 ↓
 
-`Season_India`
+`season`
 
 ↓
 
@@ -91,61 +162,130 @@ La estrategia implementada sigue este orden:
 
 El ranking global funciona como respaldo final y no está sujeto al mínimo de soporte contextual.
 
-El objetivo es evitar recomendaciones vacías cuando una combinación específica de contexto tiene pocos datos.
+El objetivo es evitar recomendaciones vacías cuando una combinación específica de contexto contiene pocas observaciones.
+
+---
 
 ## Construcción progresiva del Top K
 
 El fallback puede completar el ranking utilizando más de un nivel.
 
-Ejemplo:
+Por ejemplo:
 
-- un segmento `Season_India + Location` puede aportar algunos productos;
+- un segmento `season + Location` puede aportar algunos productos;
 - `Location` puede completar los candidatos restantes;
-- si todavía faltan productos, se continúa con `Season_India`;
+- si todavía faltan productos, se continúa con `season`;
 - finalmente se utiliza el ranking global.
 
 Un producto nunca se agrega más de una vez.
 
+---
+
 ## Trazabilidad
 
-La función `recommend_contextual_popularity()` devuelve además una traza con:
+La función:
 
-- nivel evaluado;
-- soporte disponible;
+`recommend_contextual_popularity()`
+
+devuelve además una traza que permite conocer:
+
+- el nivel contextual evaluado;
+- el soporte disponible;
 - si el nivel fue utilizado;
-- motivo por el cual fue utilizado o descartado;
-- productos agregados desde ese nivel.
+- el motivo por el cual fue utilizado o descartado;
+- los productos agregados desde ese nivel.
 
-Esto permite posteriormente auditar por qué una recomendación utilizó contexto específico o recurrió a un fallback.
+Esto permite auditar posteriormente por qué una recomendación utilizó contexto específico o recurrió a un nivel de fallback menos específico.
 
-## Integración con código existente
+---
 
-La implementación de esta Issue se agregó como un módulo nuevo.
+## Integración con el código existente
 
-No se modificó la lógica existente del recomendador ni los modelos desarrollados previamente.
+Como parte de la estandarización se revisaron los componentes que construían o consumían estas features.
 
-El objetivo es que esta lógica pueda ser reutilizada posteriormente por otros componentes sin duplicar reglas de temporada, soporte o fallback.
+Actualmente:
+
+- `src/reactiva/features/build_features.py` es la fuente única para construir `season` y `age_group`;
+- `src/reactiva/features/context.py` reutiliza `add_season()` para rankings y fallback contextual;
+- `src/reactiva/recommender/recommender.py` reutiliza la construcción estandarizada de `season`;
+- `src/reactiva/modeling/model_comparasion_270day_metrics_updated_threshold_070.ipynb` reutiliza `build_features()` para obtener `season` y `age_group`;
+- `notebooks/02_recommender_feasibility.ipynb` reutiliza `add_season()` para el análisis de soporte del fallback.
+
+La estandarización no modifica la lógica matemática de los modelos ni los criterios existentes de recomendación.
+
+El objetivo del cambio es eliminar definiciones duplicadas y garantizar que todos los consumidores utilicen los mismos nombres y reglas para las features derivadas.
+
+---
+
+## Validación del notebook de comparación de modelos
+
+Después de reemplazar la creación manual de `season` y `age_group` por `build_features()`, el notebook de comparación de modelos fue ejecutado nuevamente desde un kernel limpio.
+
+La partición temporal se mantuvo sin cambios:
+
+- fecha máxima: `2024-12-30`;
+- fecha de corte: `2024-04-04`;
+- filas de entrenamiento: `6281`;
+- filas de holdout: `3719`;
+- clientes evaluados: `1877`;
+- temporadas disponibles: `monsoon`, `post-monsoon`, `summer` y `winter`.
+
+Las métricas finales de los modelos también se mantuvieron sin cambios.
+
+Esto confirma que la centralización de features no alteró el comportamiento de la evaluación existente.
+
+---
+
+## Validación del notebook de factibilidad
+
+El notebook:
+
+`notebooks/02_recommender_feasibility.ipynb`
+
+fue actualizado para utilizar `add_season()` en lugar de volver a implementar manualmente la clasificación por temporada.
+
+Luego se ejecutó completamente desde un kernel limpio.
+
+El análisis de `Location + season` mantuvo los mismos resultados principales:
+
+- 80 segmentos;
+- promedio de 125 transacciones por segmento;
+- mediana de 124.5;
+- mínimo de 67 transacciones;
+- máximo de 208 transacciones;
+- promedio de 23.02 productos distintos por segmento;
+- 40 segmentos con los 24 productos;
+- 23 segmentos con menos de 100 transacciones;
+- ningún segmento con menos de 50 transacciones.
+
+Esto confirma que la estandarización no modificó los resultados del análisis de factibilidad.
+
+---
 
 ## Pruebas automáticas
 
-Se agregó:
+Las pruebas específicas de contexto se encuentran en:
 
 `tests/test_context.py`
 
-Las pruebas verifican:
+Actualmente verifican, entre otros puntos:
 
 - asignación correcta de temporadas;
 - rechazo de meses inválidos;
 - normalización de nombres de temporada;
 - no modificación del DataFrame original;
+- construcción estandarizada de `age_group`;
+- construcción conjunta de features;
 - construcción de rankings globales y contextuales;
 - aplicación del soporte mínimo;
 - fallback hacia niveles menos específicos;
 - existencia de fallback global;
 - ausencia de productos repetidos.
 
-Al finalizar la implementación se ejecutó la suite completa del proyecto:
+La suite completa del proyecto fue ejecutada después de los cambios:
 
-`17 passed`
+`19 passed`
 
-Esto confirma que los nuevos componentes funcionan y que no se introdujeron regresiones en las pruebas existentes.
+Además, ambos notebooks modificados fueron ejecutados completamente desde un kernel limpio sin errores.
+
+Esto confirma que la centralización de features y la integración de la Issue #47 no introdujeron regresiones detectadas por las pruebas existentes.

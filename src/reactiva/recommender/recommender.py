@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 from reactiva.config import DATASET_URI,MATRIX_UIR,S3_BUCKET
+from reactiva.features.build_features import add_season, season_from_month
 
 from collections import defaultdict
 import s3fs
@@ -19,23 +20,11 @@ def recommend_popularity_inactive_customers(
     inactivity_days=270
 ):
 
-    df = df.copy()
-
-    df['Purchase Date'] = pd.to_datetime(
-        df['Purchase Date']
-    )
-
     # --------------------------------------------------------
-    # Create season from purchase date
+    # Add standardized season feature
     # --------------------------------------------------------
 
-    df['season'] = df['Purchase Date'].dt.month.apply(
-        lambda x:
-            'winter' if x in (12, 1, 2)
-            else 'summer' if x in (3, 4, 5)
-            else 'monsoon' if x in (6, 7, 8, 9)
-            else 'post-monsoon'
-    )
+    df = add_season(df)
 
     # --------------------------------------------------------
     # Current season
@@ -43,11 +32,8 @@ def recommend_popularity_inactive_customers(
 
     current_month = pd.Timestamp.now().month
 
-    current_season = (
-        'winter' if current_month in (12, 1, 2)
-        else 'summer' if current_month in (3, 4, 5)
-        else 'monsoon' if current_month in (6, 7, 8, 9)
-        else 'post-monsoon'
+    current_season = season_from_month(
+        current_month
     )
 
     # --------------------------------------------------------
@@ -158,6 +144,3 @@ def get_recommendations_items(trigger_item, top_n=5):
     scores_filter = scores.sort_values(ascending=False)
 
     return scores_filter.head(top_n).index.tolist()
-
-
-
