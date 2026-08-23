@@ -17,6 +17,10 @@ MATRIX_UIR = os.getenv('MATRIX_URI')
 AWS_REGION = os.getenv("AWS_REGION")
 API_KEY = os.getenv("API_KEY")
 
+#CREDNETIALS
+USUARIO_ADMIN = os.getenv('USUARIO_ADMIN')
+PASSWORD_ADMIN = os.getenv('PASSWORD_ADMIN')
+
 
 # Validamos las variables obligatorias para trabajar con el dataset.
 if not DATASET_URI:
