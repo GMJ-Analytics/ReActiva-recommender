@@ -7,10 +7,10 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 from dotenv import load_dotenv
-from src.reactiva.config import AWS_REGION, DATASET_URI, S3_BUCKET, USUARIO_ADMIN, PASSWORD_ADMIN
-from src.reactiva.utils.logger import log_event, setup_logger
-from src.reactiva.recommender.recommend import user_recomendation
-from src.reactiva.data.validate_data import FULL_DEFAULT_STRATEGY, DataValidator
+from reactiva.config import AWS_REGION, DATASET_URI, S3_BUCKET, USUARIO_ADMIN, PASSWORD_ADMIN
+from reactiva.utils.logger import log_event, setup_logger
+from reactiva.recommender.recommender import get_recommendations_items
+from reactiva.data.validate_data import FULL_DEFAULT_STRATEGY, DataValidator
 
 load_dotenv()
 logger = setup_logger(name='reactiva.app.streamlit')
@@ -91,9 +91,11 @@ ESTRATEGIA_INDIVIDUAL = {
 
 DIAS_CHURN = 270  # mismo corte que usa el recomendador
 
-
+if "usuario" not in st.session_state:
+    st.session_state["usuario"] = ""
 
 #funciones para la estructura de la pagina:
+
 
 @st.cache_data(show_spinner='Leyendo dataset historico...')
 def cargar_dataset() -> pd.DataFrame:
@@ -185,25 +187,20 @@ def campo_numerico(columna: str, etiqueta: str = None):
     return st.number_input(etiqueta, min_value=minimo, max_value=maximo, value=defecto)
 
 
-def obtener_recomendacion(customer_id):
+def obtener_recomendacion(Item_purchased):
     """
-    Envuelve recommender.user_recomendation para poder mostrar el resultado
-    en pantalla.
+    Envuelve get_recommendations_items (item-based) para poder mostrar
+    el resultado en pantalla. Recibe un item, no un Customer ID.
     """
-    buffer = io.StringIO()
-
     try:
-        with contextlib_redirect(buffer):
-            user_recomendation(customer_id)
+        recomendacion = get_recommendations_items(Item_purchased)
     except Exception as error:
         return None, f'El recomendador fallo: {error}'
 
-    salida = buffer.getvalue().strip()
+    if not recomendacion:
+        return None, 'Sin items similares suficientes para este item.'
 
-    if not salida or 'no hay recomendaciones' in salida.lower():
-        return None, 'Sin clientes similares suficientes para este cliente.'
-
-    return salida, None
+    return recomendacion, None
 
 
 def contextlib_redirect(buffer):
@@ -463,7 +460,7 @@ with tabs[0]:
         log_event(
             logger,
             'Indexacion individual recibida',
-            customer_id=int(customer_id),
+            customer_id=str(customer_id),
             transaction_id=transaction_id,
             modo=modo,
         )
@@ -499,39 +496,20 @@ with tabs[0]:
         else:
             st.warning('El registro se valido pero no se pudo subir a la Base de Datos. Reintentar o comunicarse con el soporte.')
 
-        #recomendacion
+        #recomendacion — prediccion unica, item-based
         st.markdown('---')
         st.subheader('🔮 Recomendaciones')
 
-        if modo == 'Cliente existente':
-            recomendacion, aviso = obtener_recomendacion(customer_id)
+        recomendacion, aviso = obtener_recomendacion(item_purchased)
 
-            if recomendacion:
-                st.success(recomendacion)
-                log_event(logger, 'Recomendacion generada',
-                          customer_id=int(customer_id), fuente='colaborativo')
-            else:
-                st.warning(aviso)
-                log_event(logger, 'Recomendacion no disponible', level=30,
-                          customer_id=int(customer_id), motivo=aviso)
-
-        elif df_historico is not None:
-            sugerencias = recomendar_por_perfil(df_historico, record)
-
-            if sugerencias.empty:
-                st.warning('No hay clientes comparables para este perfil.')
-                log_event(logger, 'Cold start sin resultados', level=30,
-                          customer_id=int(customer_id))
-            else:
-                st.caption(
-                    f'Perfiles similares en {location}, temporada {temporada}:'
-                )
-                for item, veces in sugerencias.items():
-                    st.info(f'• {item} — {veces} compras de perfiles parecidos')
-
-                log_event(logger, 'Recomendacion generada',
-                          customer_id=int(customer_id), fuente='cold_start',
-                          items=len(sugerencias))
+        if recomendacion:
+            st.success('Items similares a **' + item_purchased + '**: ' + ', '.join(recomendacion))
+            log_event(logger, 'Recomendacion generada',
+                      item=item_purchased, fuente='item_based')
+        else:
+            st.warning(aviso)
+            log_event(logger, 'Recomendacion no disponible', level=30,
+                      item=item_purchased, motivo=aviso)
 
 
 #TAB 2 - carga masiva
@@ -703,9 +681,18 @@ with tabs[2]:
                         st.write(f'- Ofrecer **{item}** ({veces} compras de clientes similares)')
 
                 st.divider()
-                st.caption('Salida del recomendador colaborativo:')
-                recomendacion, aviso = obtener_recomendacion(cliente)
-                st.write(recomendacion or aviso)
+                st.caption('Salida del recomendador item-based:')
+
+                ultimo_item = datos['historial'].iloc[0]['Item Purchased']
+                recomendacion, aviso = obtener_recomendacion(ultimo_item)
+
+                if recomendacion:
+                    st.write(
+                        f'Items similares a **{ultimo_item}**: '
+                        + ', '.join(recomendacion)
+                    )
+                else:
+                    st.write(aviso)
 
             with t_camp:
                 st.caption('Arma el mensaje a enviar.')
