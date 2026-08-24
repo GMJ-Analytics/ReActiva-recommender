@@ -1,0 +1,38 @@
+# Git
+.git/
+
+# Virtual environments
+.venv/
+.FP_env/
+FP_env/
+
+# Python cache
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Test cache
+.pytest_cache/
+
+# Environment variables and secrets
+.env
+.env.*
+
+# IDE
+.vscode/
+
+# Jupyter temporary files
+.ipynb_checkpoints/
+**/.ipynb_checkpoints/
+
+# Logs
+*.log
+
+# Local generated artifacts
+artifacts/
+
+# Operating system files
+.DS_Store
+Thumbs.db
