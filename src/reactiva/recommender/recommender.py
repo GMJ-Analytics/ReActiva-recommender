@@ -1,63 +1,104 @@
-import numpy as np
 import pandas as pd
-from reactiva.config import DATASET_URI,MATRIX_UIR,S3_BUCKET
-
-from collections import defaultdict
-import s3fs
-from matplotlib import pyplot as plt
-import seaborn as sns
 from sklearn.metrics.pairwise import cosine_similarity
-from sklearn.feature_extraction.text import TfidfVectorizer
+from reactiva.config import MATRIX_UIR
+from reactiva.features.build_features import (add_season, season_from_month)
+from reactiva.features.context import (recommend_contextual_popularity)
 
-df = pd.read_csv(DATASET_URI)
-similarity = pd.read_csv(MATRIX_UIR)
 
+# ============================================================
+# ITEM-SIMILARITY MATRIX CACHE
+# ============================================================
+
+_similarity_matrix = None
+
+
+def _load_similarity_matrix():
+    """
+    Load the item-similarity matrix only when it is required.
+
+    The matrix is cached after the first load so importing this
+    module does not trigger unnecessary I/O.
+    """
+
+    global _similarity_matrix
+
+    if _similarity_matrix is None:
+        _similarity_matrix = pd.read_csv(MATRIX_UIR)
+
+    return _similarity_matrix
+
+
+# ============================================================
+# CUSTOMER PROFILE
+# ============================================================
 
 def build_customer_profile(df):
+    """
+    Build the customer-item interaction matrix used by the
+    User-Based Collaborative Filtering recommender.
+    """
+
     customer_item_matrix = (
         df
-        .groupby(['Customer ID', 'Item Purchased'])
+        .groupby(["Customer ID", "Item Purchased"])
         .size()
         .unstack(fill_value=0)
     )
+
     return customer_item_matrix
 
 
 def build_customer_similarity(df):
+    """
+    Build the customer-to-customer cosine-similarity matrix.
+    """
+
     customer_item_matrix = build_customer_profile(df)
-    similarity = cosine_similarity(customer_item_matrix)
+
+    similarity = cosine_similarity(
+        customer_item_matrix
+    )
+
     similarity_df = pd.DataFrame(
         similarity,
         index=customer_item_matrix.index,
-        columns=customer_item_matrix.index
+        columns=customer_item_matrix.index,
     )
+
     return similarity_df
 
+
+# ============================================================
+# USER-BASED RECOMMENDER FOR INACTIVE CUSTOMERS
+# ============================================================
 
 def recommend_user_based_inactive_customers(
     df,
     k=5,
     inactivity_days=270,
-    top_n=5
+    top_n=5,
 ):
+    """
+    Generate recommendations for inactive customers using
+    User-Based Collaborative Filtering.
 
-    df = df.copy()
+    If the collaborative-filtering model cannot produce usable
+    recommendations, the standardized contextual fallback is used:
 
-    df['Purchase Date'] = pd.to_datetime(
-        df['Purchase Date']
-    )
+    season + Location
+        ->
+    Location
+        ->
+    season
+        ->
+    Global
+    """
 
     # --------------------------------------------------------
-    # Create season from purchase date
+    # Add standardized season feature
     # --------------------------------------------------------
 
-    df['season'] = df['Purchase Date'].dt.month.apply(
-        lambda x:
-            'winter' if x in (12, 1, 2)
-            else 'summer' if x in (3, 4, 5)
-            else 'monsoon' if x in (6, 7, 8, 9)
-            else 'post-monsoon'
-    )
+    df = add_season(df)
 
     # --------------------------------------------------------
     # Current season
@@ -65,11 +106,8 @@ def recommend_user_based_inactive_customers(
 
     current_month = pd.Timestamp.now().month
 
-    current_season = (
-        'winter' if current_month in (12, 1, 2)
-        else 'summer' if current_month in (3, 4, 5)
-        else 'monsoon' if current_month in (6, 7, 8, 9)
-        else 'post-monsoon'
+    current_season = season_from_month(
+        current_month
     )
 
     # --------------------------------------------------------
@@ -77,12 +115,13 @@ def recommend_user_based_inactive_customers(
     # --------------------------------------------------------
 
     last_purchase = (
-        df.groupby('Customer ID')['Purchase Date']
+        df
+        .groupby("Customer ID")["Purchase Date"]
         .max()
     )
 
     cutoff_date = (
-        df['Purchase Date'].max()
+        df["Purchase Date"].max()
         - pd.Timedelta(days=inactivity_days)
     )
 
@@ -98,47 +137,32 @@ def recommend_user_based_inactive_customers(
     # --------------------------------------------------------
 
     customer_location = (
-        df.sort_values('Purchase Date')
-        .groupby('Customer ID')['Location']
+        df
+        .sort_values("Purchase Date")
+        .groupby("Customer ID")["Location"]
         .last()
     )
 
     # --------------------------------------------------------
     # Customer-item profile + similarity matrix
-    # (built on full purchase history, all seasons, so
-    # inactive customers with no current-season purchases
-    # still get a similarity score)
+    #
+    # Built on the full purchase history, across all seasons,
+    # so inactive customers with no current-season purchases
+    # still receive a similarity score.
     # --------------------------------------------------------
 
     similarity_df = build_customer_similarity(df)
 
     # --------------------------------------------------------
-    # Purchases from the current season only, used as the
-    # pool neighbors' recommendations are drawn from
+    # Purchases from the current season only.
+    #
+    # These purchases form the candidate pool from which
+    # neighbors' recommendations are selected.
     # --------------------------------------------------------
 
-    current_season_data = df[df['season'] == current_season]
-
-    # --------------------------------------------------------
-    # Location + season popularity, used only as a fallback
-    # when a customer has no usable neighbors
-    # --------------------------------------------------------
-
-    def location_season_popularity(location, k):
-        location_season_data = current_season_data[
-            current_season_data['Location'] == location
-        ]
-
-        if location_season_data.empty:
-            return []
-
-        return (
-            location_season_data['Item Purchased']
-            .value_counts()
-            .head(k)
-            .index
-            .tolist()
-        )
+    current_season_data = df[
+        df["season"] == current_season
+    ]
 
     results = []
 
@@ -153,33 +177,44 @@ def recommend_user_based_inactive_customers(
         ]
 
         # ----------------------------------------------------
-        # User-based CF: find the customer's nearest
-        # neighbors by purchase-profile similarity, then
-        # recommend the neighbors' most frequent items
-        # purchased in the current season
+        # User-Based Collaborative Filtering
+        #
+        # Find the customer's nearest neighbors by purchase
+        # profile similarity and recommend their most frequent
+        # products purchased during the current season.
         # ----------------------------------------------------
 
         recommendation = []
 
         if customer_id in similarity_df.index:
+
             neighbors = (
                 similarity_df[customer_id]
                 .drop(customer_id)
                 .sort_values(ascending=False)
                 .head(top_n)
             )
-            neighbors = neighbors[neighbors > 0]
+
+            neighbors = neighbors[
+                neighbors > 0
+            ]
 
             if not neighbors.empty:
-                neighbor_purchases = current_season_data[
-                    current_season_data['Customer ID'].isin(
-                        neighbors.index
-                    )
-                ]
+
+                neighbor_purchases = (
+                    current_season_data[
+                        current_season_data[
+                            "Customer ID"
+                        ].isin(neighbors.index)
+                    ]
+                )
 
                 if not neighbor_purchases.empty:
+
                     recommendation = (
-                        neighbor_purchases['Item Purchased']
+                        neighbor_purchases[
+                            "Item Purchased"
+                        ]
                         .value_counts()
                         .head(k)
                         .index
@@ -187,56 +222,86 @@ def recommend_user_based_inactive_customers(
                     )
 
         # ----------------------------------------------------
-        # Fallback: no neighbors, or no neighbor activity in
-        # the current season -> location + season popularity
+        # Standardized contextual fallback
+        #
+        # Used only when User-Based CF cannot produce usable
+        # recommendations.
         # ----------------------------------------------------
 
         if not recommendation:
-            recommendation = location_season_popularity(location, k)
 
-        results.append({
-            'Customer ID': customer_id,
-            'Location': location,
-            'Current Season': current_season,
-            'Recommendations': recommendation
-        })
+            contextual_result = (
+                recommend_contextual_popularity(
+                    df=df,
+                    location=location,
+                    season=current_season,
+                    k=k,
+                )
+            )
+
+            recommendation = contextual_result[
+                "recommendations"
+            ]
+
+        results.append(
+            {
+                "Customer ID": customer_id,
+                "Location": location,
+                "Current Season": current_season,
+                "Recommendations": recommendation,
+            }
+        )
 
     return pd.DataFrame(results)
 
-recommendations = recommend_user_based_inactive_customers(
-    df,
-    k=5,
-    inactivity_days=270,
-    top_n=5
-)
 
-print(recommendations)
+# ============================================================
+# ITEM-BASED RECOMMENDATIONS
+# ============================================================
 
-#_______________#
+def get_recommendations_items(
+    trigger_item,
+    top_n=5,
+):
+    """
+    Return the most similar products for a trigger item.
 
-def get_recommendations_items(trigger_item, top_n=5):
+    The item-similarity matrix is loaded lazily on first use
+    instead of during module import.
+    """
+
+    similarity = _load_similarity_matrix()
 
     # Check whether the trigger exists in the Items column
-    
-    if trigger_item not in similarity['Items'].values:
+
+    if trigger_item not in similarity["Items"].values:
         return []
 
     # Get the row corresponding to the trigger item
+
     scores = similarity.loc[
-        similarity['Items'] == trigger_item
+        similarity["Items"] == trigger_item
     ].iloc[0]
-    
+
     # Remove the Items label
-    scores = scores.drop('Items')
-    
+
+    scores = scores.drop("Items")
+
     # Remove zero similarities
-    scores = scores[scores > 0]
-    
+
+    scores = scores[
+        scores > 0
+    ]
 
     # Highest similarity first
-    scores_filter = scores.sort_values(ascending=False)
 
-    return scores_filter.head(top_n).index.tolist()
+    scores_filter = scores.sort_values(
+        ascending=False
+    )
 
-
-
+    return (
+        scores_filter
+        .head(top_n)
+        .index
+        .tolist()
+    )

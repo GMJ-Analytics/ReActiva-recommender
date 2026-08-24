@@ -11,6 +11,7 @@ from reactiva.config import AWS_REGION, DATASET_URI, S3_BUCKET, USUARIO_ADMIN, P
 from reactiva.utils.logger import log_event, setup_logger
 from reactiva.recommender.recommender import get_recommendations_items
 from reactiva.data.validate_data import FULL_DEFAULT_STRATEGY, DataValidator
+from reactiva.features.build_features import add_season, season_from_date
 
 load_dotenv()
 logger = setup_logger(name='reactiva.app.streamlit')
@@ -143,18 +144,6 @@ def pantalla_login() -> None:
             )
             st.rerun()
 
-def asignar_session(fecha) -> str:
-    """Devuelve la temporada climatica que usa el recomendador."""
-    mes = pd.Timestamp(fecha).month
-
-    if mes in (12, 1, 2):
-        return 'winter'
-    if mes in (3, 4, 5):
-        return 'summer'
-    if mes in (6, 7, 8, 9):
-        return 'monsoon'
-    return 'post-monsoon'
-
 
 def campo_categorico(df: pd.DataFrame, columna: str, etiqueta: str = None):
     """
@@ -218,14 +207,13 @@ def recomendar_por_perfil(df: pd.DataFrame, perfil: dict, top_n: int = 5) -> pd.
     una regla simple: que compraron en esta temporada los clientes del mismo
     genero, ciudad y franja etaria.
     """
-    temporada = asignar_session(datetime.now())
+    temporada = season_from_date(datetime.now())
     edad = perfil.get('Age', 30)
 
-    df = df.copy()
-    df['session'] = df['Purchase Date'].apply(asignar_session)
+    df = add_season(df)
 
     filtro = (
-        (df['session'] == temporada)
+        (df['season'] == temporada)
         & (df['Location'] == perfil.get('Location'))
         & (df['Gender'] == perfil.get('Gender'))
         & (df['Age'].between(edad - 7, edad + 7))
@@ -235,7 +223,7 @@ def recomendar_por_perfil(df: pd.DataFrame, perfil: dict, top_n: int = 5) -> pd.
 
     # Si el filtro queda vacio se afloja a solo temporada + ciudad.
     if len(similares) < 10:
-        similares = df[(df['session'] == temporada) & (df['Location'] == perfil.get('Location'))]
+        similares = df[(df['season'] == temporada) & (df['Location'] == perfil.get('Location'))]
 
     if similares.empty:
         return pd.Series(dtype=int)
@@ -410,7 +398,7 @@ with tabs[0]:
         st.subheader('🏬 Canal')
         online_offline = campo_categorico(df_historico, 'Online/Offline', 'Canal de venta')
 
-        temporada = asignar_session(purchase_date)
+        temporada = season_from_date(purchase_date)
         st.metric('Temporada actual', temporada)
 
 
@@ -450,7 +438,7 @@ with tabs[0]:
             'Category': category,
             'Item Purchased': item_purchased,
             'Brand': brand,
-            'session': temporada,
+            'season': temporada,
         }
         record.update(operativos)
 
