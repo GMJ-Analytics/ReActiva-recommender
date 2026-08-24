@@ -7,10 +7,11 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 from dotenv import load_dotenv
-from src.reactiva.config import AWS_REGION, DATASET_URI, S3_BUCKET, USUARIO_ADMIN, PASSWORD_ADMIN
-from src.reactiva.utils.logger import log_event, setup_logger
-from src.reactiva.recommender.recommend import user_recomendation
-from src.reactiva.data.validate_data import FULL_DEFAULT_STRATEGY, DataValidator
+from reactiva.config import AWS_REGION, DATASET_URI, S3_BUCKET, USUARIO_ADMIN, PASSWORD_ADMIN
+from reactiva.utils.logger import log_event, setup_logger
+from reactiva.recommender.recommender import get_recommendations_items
+from reactiva.data.validate_data import FULL_DEFAULT_STRATEGY, DataValidator
+from reactiva.features.build_features import add_season, season_from_date
 
 load_dotenv()
 logger = setup_logger(name='reactiva.app.streamlit')
@@ -91,9 +92,11 @@ ESTRATEGIA_INDIVIDUAL = {
 
 DIAS_CHURN = 270  # mismo corte que usa el recomendador
 
-
+if "usuario" not in st.session_state:
+    st.session_state["usuario"] = ""
 
 #funciones para la estructura de la pagina:
+
 
 @st.cache_data(show_spinner='Leyendo dataset historico...')
 def cargar_dataset() -> pd.DataFrame:
@@ -141,18 +144,6 @@ def pantalla_login() -> None:
             )
             st.rerun()
 
-def asignar_session(fecha) -> str:
-    """Devuelve la temporada climatica que usa el recomendador."""
-    mes = pd.Timestamp(fecha).month
-
-    if mes in (12, 1, 2):
-        return 'winter'
-    if mes in (3, 4, 5):
-        return 'summer'
-    if mes in (6, 7, 8, 9):
-        return 'monsoon'
-    return 'post-monsoon'
-
 
 def campo_categorico(df: pd.DataFrame, columna: str, etiqueta: str = None):
     """
@@ -185,25 +176,20 @@ def campo_numerico(columna: str, etiqueta: str = None):
     return st.number_input(etiqueta, min_value=minimo, max_value=maximo, value=defecto)
 
 
-def obtener_recomendacion(customer_id):
+def obtener_recomendacion(Item_purchased):
     """
-    Envuelve recommender.user_recomendation para poder mostrar el resultado
-    en pantalla.
+    Envuelve get_recommendations_items (item-based) para poder mostrar
+    el resultado en pantalla. Recibe un item, no un Customer ID.
     """
-    buffer = io.StringIO()
-
     try:
-        with contextlib_redirect(buffer):
-            user_recomendation(customer_id)
+        recomendacion = get_recommendations_items(Item_purchased)
     except Exception as error:
         return None, f'El recomendador fallo: {error}'
 
-    salida = buffer.getvalue().strip()
+    if not recomendacion:
+        return None, 'Sin items similares suficientes para este item.'
 
-    if not salida or 'no hay recomendaciones' in salida.lower():
-        return None, 'Sin clientes similares suficientes para este cliente.'
-
-    return salida, None
+    return recomendacion, None
 
 
 def contextlib_redirect(buffer):
@@ -221,14 +207,13 @@ def recomendar_por_perfil(df: pd.DataFrame, perfil: dict, top_n: int = 5) -> pd.
     una regla simple: que compraron en esta temporada los clientes del mismo
     genero, ciudad y franja etaria.
     """
-    temporada = asignar_session(datetime.now())
+    temporada = season_from_date(datetime.now())
     edad = perfil.get('Age', 30)
 
-    df = df.copy()
-    df['session'] = df['Purchase Date'].apply(asignar_session)
+    df = add_season(df)
 
     filtro = (
-        (df['session'] == temporada)
+        (df['season'] == temporada)
         & (df['Location'] == perfil.get('Location'))
         & (df['Gender'] == perfil.get('Gender'))
         & (df['Age'].between(edad - 7, edad + 7))
@@ -238,7 +223,7 @@ def recomendar_por_perfil(df: pd.DataFrame, perfil: dict, top_n: int = 5) -> pd.
 
     # Si el filtro queda vacio se afloja a solo temporada + ciudad.
     if len(similares) < 10:
-        similares = df[(df['session'] == temporada) & (df['Location'] == perfil.get('Location'))]
+        similares = df[(df['season'] == temporada) & (df['Location'] == perfil.get('Location'))]
 
     if similares.empty:
         return pd.Series(dtype=int)
@@ -413,7 +398,7 @@ with tabs[0]:
         st.subheader('🏬 Canal')
         online_offline = campo_categorico(df_historico, 'Online/Offline', 'Canal de venta')
 
-        temporada = asignar_session(purchase_date)
+        temporada = season_from_date(purchase_date)
         st.metric('Temporada actual', temporada)
 
 
@@ -453,7 +438,7 @@ with tabs[0]:
             'Category': category,
             'Item Purchased': item_purchased,
             'Brand': brand,
-            'session': temporada,
+            'season': temporada,
         }
         record.update(operativos)
 
@@ -463,7 +448,7 @@ with tabs[0]:
         log_event(
             logger,
             'Indexacion individual recibida',
-            customer_id=int(customer_id),
+            customer_id=str(customer_id),
             transaction_id=transaction_id,
             modo=modo,
         )
@@ -499,39 +484,20 @@ with tabs[0]:
         else:
             st.warning('El registro se valido pero no se pudo subir a la Base de Datos. Reintentar o comunicarse con el soporte.')
 
-        #recomendacion
+        #recomendacion — prediccion unica, item-based
         st.markdown('---')
         st.subheader('🔮 Recomendaciones')
 
-        if modo == 'Cliente existente':
-            recomendacion, aviso = obtener_recomendacion(customer_id)
+        recomendacion, aviso = obtener_recomendacion(item_purchased)
 
-            if recomendacion:
-                st.success(recomendacion)
-                log_event(logger, 'Recomendacion generada',
-                          customer_id=int(customer_id), fuente='colaborativo')
-            else:
-                st.warning(aviso)
-                log_event(logger, 'Recomendacion no disponible', level=30,
-                          customer_id=int(customer_id), motivo=aviso)
-
-        elif df_historico is not None:
-            sugerencias = recomendar_por_perfil(df_historico, record)
-
-            if sugerencias.empty:
-                st.warning('No hay clientes comparables para este perfil.')
-                log_event(logger, 'Cold start sin resultados', level=30,
-                          customer_id=int(customer_id))
-            else:
-                st.caption(
-                    f'Perfiles similares en {location}, temporada {temporada}:'
-                )
-                for item, veces in sugerencias.items():
-                    st.info(f'• {item} — {veces} compras de perfiles parecidos')
-
-                log_event(logger, 'Recomendacion generada',
-                          customer_id=int(customer_id), fuente='cold_start',
-                          items=len(sugerencias))
+        if recomendacion:
+            st.success('Items similares a **' + item_purchased + '**: ' + ', '.join(recomendacion))
+            log_event(logger, 'Recomendacion generada',
+                      item=item_purchased, fuente='item_based')
+        else:
+            st.warning(aviso)
+            log_event(logger, 'Recomendacion no disponible', level=30,
+                      item=item_purchased, motivo=aviso)
 
 
 #TAB 2 - carga masiva
@@ -703,9 +669,18 @@ with tabs[2]:
                         st.write(f'- Ofrecer **{item}** ({veces} compras de clientes similares)')
 
                 st.divider()
-                st.caption('Salida del recomendador colaborativo:')
-                recomendacion, aviso = obtener_recomendacion(cliente)
-                st.write(recomendacion or aviso)
+                st.caption('Salida del recomendador item-based:')
+
+                ultimo_item = datos['historial'].iloc[0]['Item Purchased']
+                recomendacion, aviso = obtener_recomendacion(ultimo_item)
+
+                if recomendacion:
+                    st.write(
+                        f'Items similares a **{ultimo_item}**: '
+                        + ', '.join(recomendacion)
+                    )
+                else:
+                    st.write(aviso)
 
             with t_camp:
                 st.caption('Arma el mensaje a enviar.')

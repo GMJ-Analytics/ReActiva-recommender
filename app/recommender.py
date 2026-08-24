@@ -1,7 +1,6 @@
 import numpy as np
 import pandas as pd
 from reactiva.config import DATASET_URI,MATRIX_UIR,S3_BUCKET
-from reactiva.features.build_features import add_season, season_from_month
 
 from collections import defaultdict
 import s3fs
@@ -42,11 +41,23 @@ def recommend_user_based_inactive_customers(
     top_n=5
 ):
 
+    df = df.copy()
+
+    df['Purchase Date'] = pd.to_datetime(
+        df['Purchase Date']
+    )
+
     # --------------------------------------------------------
-    # Add standardized season feature
+    # Create season from purchase date
     # --------------------------------------------------------
 
-    df = add_season(df)
+    df['season'] = df['Purchase Date'].dt.month.apply(
+        lambda x:
+            'winter' if x in (12, 1, 2)
+            else 'summer' if x in (3, 4, 5)
+            else 'monsoon' if x in (6, 7, 8, 9)
+            else 'post-monsoon'
+    )
 
     # --------------------------------------------------------
     # Current season
@@ -54,8 +65,11 @@ def recommend_user_based_inactive_customers(
 
     current_month = pd.Timestamp.now().month
 
-    current_season = season_from_month(
-        current_month
+    current_season = (
+        'winter' if current_month in (12, 1, 2)
+        else 'summer' if current_month in (3, 4, 5)
+        else 'monsoon' if current_month in (6, 7, 8, 9)
+        else 'post-monsoon'
     )
 
     # --------------------------------------------------------
@@ -203,7 +217,6 @@ print(recommendations)
 def get_recommendations_items(trigger_item, top_n=5):
 
     # Check whether the trigger exists in the Items column
-    
     if trigger_item not in similarity['Items'].values:
         return []
 
@@ -211,14 +224,10 @@ def get_recommendations_items(trigger_item, top_n=5):
     scores = similarity.loc[
         similarity['Items'] == trigger_item
     ].iloc[0]
-    
     # Remove the Items label
     scores = scores.drop('Items')
-    
     # Remove zero similarities
     scores = scores[scores > 0]
-    
-
     # Highest similarity first
     scores_filter = scores.sort_values(ascending=False)
 
