@@ -10,8 +10,9 @@ load_dotenv()
 DATASET_URI = os.getenv("DATASET_URI")
 S3_BUCKET = os.getenv("S3_BUCKET")
 
-# ACCESO a la cosine_similarity
+# ACCESO files
 MATRIX_UIR = os.getenv('MATRIX_URI')
+S3_PREDICTIONS_KEY = os.getenv('S3_PREDICTIOSKEY')
 
 # Configuraciones que podrán utilizarse más adelante.
 AWS_REGION = os.getenv("AWS_REGION")
