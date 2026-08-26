@@ -1,8 +1,16 @@
 import pandas as pd
+import boto3
+from botocore.exceptions import ClientError
+from io import StringIO
+from reactiva.config import S3_BUCKET,API_KEY,S3_PREDICTIONS_KEY
+from reactiva.data.load_data import cargar_datos_as3,descargar_datos_des3
+
+import logging
 from sklearn.metrics.pairwise import cosine_similarity
 from reactiva.config import MATRIX_UIR
 from reactiva.features.build_features import (add_season, season_from_month)
 from reactiva.features.context import (recommend_contextual_popularity)
+
 
 
 # ============================================================
@@ -11,6 +19,12 @@ from reactiva.features.context import (recommend_contextual_popularity)
 
 _similarity_matrix = None
 
+logging.basicConfig(
+    filename= 'logs/app.logs',
+    level=logging.INFO,
+    format=' %(asctime)s - %(levelname)s - %(message)s'
+    )
+logger = logging.getLogger(__name__)
 
 def _load_similarity_matrix():
     """
@@ -175,6 +189,8 @@ def recommend_user_based_inactive_customers(
         location = customer_location.loc[
             customer_id
         ]
+        c_name = df.loc[df['Customer ID']== customer_id,'Customer Full Name'].iloc[0]
+        c_email =df.loc[df['Customer ID']== customer_id,'Customer Email'].iloc[0]
 
         # ----------------------------------------------------
         # User-Based Collaborative Filtering
@@ -244,15 +260,29 @@ def recommend_user_based_inactive_customers(
             ]
 
         results.append(
-            {
+            {   "Customer Name":c_name,
+                "Customer Email":c_email,
                 "Customer ID": customer_id,
                 "Location": location,
                 "Current Season": current_season,
                 "Recommendations": recommendation,
+                "Date": pd.Timestamp.now()
             }
         )
+    # updating the dataframe in s3#
 
+    new_df = pd.DataFrame(results)
+    existing_df = descargar_datos_des3(S3_PREDICTIONS_KEY,S3_BUCKET)
+    
+    df_final= pd.concat([existing_df, new_df],ignore_index = True)
+
+    cargar_datos_as3(df_final,S3_PREDICTIONS_KEY,S3_BUCKET)
+
+    logger.info('recommender completed predictions')
+    
     return pd.DataFrame(results)
+
+
 
 
 # ============================================================
