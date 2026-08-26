@@ -35,3 +35,7 @@ data/processed/*
 .DS_Store
 Thumbs.db
 !.env.example
+
+# Power BI Desktop - archivos locales
+**/.pbi/localSettings.json
+**/.pbi/cache.abf

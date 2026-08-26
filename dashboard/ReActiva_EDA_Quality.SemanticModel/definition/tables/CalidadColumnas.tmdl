@@ -1,0 +1,63 @@
+table CalidadColumnas
+	lineageTag: 369721a0-411c-49cb-b977-667946f0230b
+
+	column column
+		dataType: string
+		lineageTag: dd384dcd-6d61-4c12-b7bb-c67c947b8615
+		summarizeBy: none
+		sourceColumn: column
+
+		annotation SummarizationSetBy = Automatic
+
+	column dtype
+		dataType: string
+		lineageTag: 5aa9cde6-f7ac-4a49-a69f-314e91b8de2e
+		summarizeBy: none
+		sourceColumn: dtype
+
+		annotation SummarizationSetBy = Automatic
+
+	column null_count
+		dataType: int64
+		formatString: 0
+		lineageTag: 5b98fde7-97a1-40fb-aef4-a5fc0ace5801
+		summarizeBy: sum
+		sourceColumn: null_count
+
+		annotation SummarizationSetBy = Automatic
+
+	column null_pct
+		dataType: double
+		lineageTag: 9a7f39d5-b5f3-4392-b7b0-9baec1ae7d04
+		summarizeBy: sum
+		sourceColumn: null_pct
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
+
+	column unique_values
+		dataType: int64
+		formatString: 0
+		lineageTag: 9712cfe3-1383-410a-a13d-bd90d23afd19
+		summarizeBy: sum
+		sourceColumn: unique_values
+
+		annotation SummarizationSetBy = Automatic
+
+	partition CalidadColumnas = m
+		mode: import
+		source =
+				let
+				    Origen = Csv.Document(File.Contents(RutaDatosBI & "\bi_quality_columns.csv"), [Delimiter=",", Columns=5, Encoding=65001, QuoteStyle=QuoteStyle.None]),
+				    #"Cambiar tipo" = Table.TransformColumnTypes(Origen,{{"Column1", type text}, {"Column2", type text}, {"Column3", type text}, {"Column4", type text}, {"Column5", type text}}),
+				    #"Encabezados promovidos" = Table.PromoteHeaders(#"Cambiar tipo", [PromoteAllScalars=true]),
+				    #"Tipo cambiado" = Table.TransformColumnTypes(#"Encabezados promovidos",{{"column", type text}, {"dtype", type text}, {"null_count", Int64.Type}, {"null_pct", Int64.Type}, {"unique_values", Int64.Type}}),
+				    #"Tipo cambiado con configuración regional" = Table.TransformColumnTypes(#"Tipo cambiado", {{"null_pct", type number}}, "en-US")
+				in
+				    #"Tipo cambiado con configuración regional"
+
+	annotation PBI_NavigationStepName = Navegación
+
+	annotation PBI_ResultType = Table
+

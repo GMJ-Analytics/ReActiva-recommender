@@ -1,0 +1,2 @@
+﻿total_rows,total_columns,unique_transactions,unique_customers,unique_products,unique_categories,unique_locations,total_null_values,duplicate_rows,duplicate_key_rows,unparseable_dates,future_dates,missing_required_columns,customers_with_one_purchase,dataset_min_date,dataset_max_date
+10000,27,10000,3291,24,3,20,0,0,0,0,0,0,598,2023-01-01,2024-12-30

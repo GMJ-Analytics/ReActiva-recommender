@@ -1,0 +1,28 @@
+﻿column,dtype,null_count,null_pct,unique_values
+Age,int64,0,0.0,47
+Brand,str,0,0.0,17
+Category,str,0,0.0,3
+Color,str,0,0.0,10
+Customer Email,str,0,0.0,3291
+Customer Full Name,str,0,0.0,790
+Customer ID,str,0,0.0,3291
+Delivery Speed,str,0,0.0,4
+Delivery Time (Days),int64,0,0.0,8
+Discount (%),int64,0,0.0,60
+Festival/Sale,str,0,0.0,9
+Gender,str,0,0.0,3
+Item Purchased,str,0,0.0,24
+Location,str,0,0.0,20
+Online Store,str,0,0.0,7
+Online/Offline,str,0,0.0,2
+Payment Method,str,0,0.0,7
+Previous Purchases,int64,0,0.0,81
+Purchase Amount (₹),int64,0,0.0,6611
+Purchase Date,str,0,0.0,730
+Quantity,int64,0,0.0,4
+Return Status,str,0,0.0,2
+Review Rating,int64,0,0.0,5
+Shipping Charge (₹),int64,0,0.0,4
+Size,str,0,0.0,13
+Subscription Status,str,0,0.0,2
+Transaction ID,str,0,0.0,10000

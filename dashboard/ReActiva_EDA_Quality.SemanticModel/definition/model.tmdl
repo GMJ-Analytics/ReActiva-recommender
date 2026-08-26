@@ -1,0 +1,27 @@
+model Model
+	culture: es-AR
+	defaultPowerBIDataSourceVersion: powerBI_V3
+	sourceQueryCulture: es-AR
+	valueFilterBehavior: independent
+	dataAccessOptions
+		legacyRedirects
+		returnErrorValuesAsNull
+
+annotation __PBI_TimeIntelligenceEnabled = 1
+
+annotation PBI_ProTooling = ["DevMode"]
+
+annotation PBI_QueryOrder = ["FactTransacciones","DimFecha","DimCliente","DimProducto","CalidadResumen","CalidadColumnas","RutaDatosBI"]
+
+ref table FactTransacciones
+ref table DateTableTemplate_39c5388b-2fb6-442d-9f1e-aac1d2149514
+ref table DimFecha
+ref table DimCliente
+ref table LocalDateTable_0c92fb76-2167-47c8-93c5-c66d77755083
+ref table LocalDateTable_eb756598-72f1-4024-afef-88041cc1730d
+ref table DimProducto
+ref table CalidadResumen
+ref table CalidadColumnas
+
+ref cultureInfo es-AR
+
