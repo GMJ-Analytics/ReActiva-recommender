@@ -1,3 +1,8 @@
+import boto3
+from reactiva.config import S3_BUCKET
+from io import StringIO
+import pandas as pd
+from botocore.exceptions import ClientError
 
 
 def cargar_datos():
@@ -15,5 +20,29 @@ def cargar_datos():
         return df
     except FileNotFoundError:
         print(f'please verify the path file, {path_file} does not exist')
+
+def  cargar_datos_as3(df,Key_s3,bucket):
+    buffer = StringIO()
+    s3= boto3.client('s3')
+
+    df.to_csv(buffer, index =False)
+    s3.put_object(
+        Bucket = bucket,
+        Key= Key_s3,
+        Body = buffer.getvalue()
+
+    )
+
+def descargar_datos_des3(Key_s3,bucket):
+    s3 = boto3.client('s3')
+    try:
+       response= s3.get_object(
+            Bucket= bucket,
+            Key= Key_s3
+        )
+       df = pd.DataFrame(response['Body'])
+    except ClientError:
+        df = pd.DataFrame()
+    return df
         
     
