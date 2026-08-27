@@ -8,6 +8,7 @@ __pycache__/
 *.py[cod]
 *.pyo
 *.pyd
+*.logs
 
 # Variables de entorno y credenciales
 .env
@@ -35,3 +36,7 @@ data/processed/*
 .DS_Store
 Thumbs.db
 !.env.example
+
+# Power BI Desktop - archivos locales
+**/.pbi/localSettings.json
+**/.pbi/cache.abf
