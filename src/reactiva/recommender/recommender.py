@@ -10,6 +10,7 @@ from sklearn.metrics.pairwise import cosine_similarity
 from reactiva.config import MATRIX_UIR
 from reactiva.features.build_features import (add_season, season_from_month)
 from reactiva.features.context import (recommend_contextual_popularity)
+from pathlib import Path
 
 
 
@@ -19,11 +20,16 @@ from reactiva.features.context import (recommend_contextual_popularity)
 
 _similarity_matrix = None
 
+#se crea la carpeta de logs si no existe para evitar errores
+#al importar el recomendador desde Streamlit, Docker o notebooks
+LOG_DIR = Path('logs')
+LOG_DIR.mkdir(parents=True, exist_ok=True)
+
 logging.basicConfig(
-    filename= 'logs/app.logs',
+    filename=LOG_DIR / 'app.logs',
     level=logging.INFO,
     format=' %(asctime)s - %(levelname)s - %(message)s'
-    )
+)
 logger = logging.getLogger(__name__)
 
 def _load_similarity_matrix():
