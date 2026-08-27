@@ -5,13 +5,7 @@ import pandas as pd
 from botocore.exceptions import ClientError
 
 
-def cargar_datos():
-    from reactiva.config import DATASET_URI
-    path_file =DATASET_URI
-    
-
-    import pandas as pd 
-
+def cargar_datos(path_file):
     try: 
         if path_file.endswith('.xlsx'):
             df = pd.read_excel(path_file)
