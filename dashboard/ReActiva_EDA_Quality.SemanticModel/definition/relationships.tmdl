@@ -1,0 +1,22 @@
+relationship dff84f79-d073-4ace-a3bc-8c75ee878488
+	joinOnDateBehavior: datePartOnly
+	fromColumn: DimCliente.first_purchase
+	toColumn: LocalDateTable_0c92fb76-2167-47c8-93c5-c66d77755083.Date
+
+relationship 192a83bc-81ef-454b-9265-31d289a72a7e
+	joinOnDateBehavior: datePartOnly
+	fromColumn: DimCliente.last_purchase
+	toColumn: LocalDateTable_eb756598-72f1-4024-afef-88041cc1730d.Date
+
+relationship AutoDetected_a158f640-e120-42fa-a284-deebd0d6b472
+	fromColumn: FactTransacciones.'Customer ID'
+	toColumn: DimCliente.'Customer ID'
+
+relationship AutoDetected_b959bcf2-a433-4c93-8205-3417541e82c8
+	fromColumn: FactTransacciones.'Item Purchased'
+	toColumn: DimProducto.'Item Purchased'
+
+relationship c63a5248-95ad-d3ee-2d1d-f940ab07d3fd
+	fromColumn: FactTransacciones.'Purchase Date'
+	toColumn: DimFecha.date
+

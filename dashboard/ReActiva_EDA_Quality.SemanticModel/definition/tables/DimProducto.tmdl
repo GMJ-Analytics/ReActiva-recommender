@@ -1,0 +1,35 @@
+table DimProducto
+	lineageTag: 75615216-fde5-4f03-a5ad-1fb4d152198f
+
+	column 'Item Purchased'
+		dataType: string
+		lineageTag: b60b33a6-8218-4678-b5c0-04f9478eb37b
+		summarizeBy: none
+		sourceColumn: Item Purchased
+
+		annotation SummarizationSetBy = Automatic
+
+	column category
+		dataType: string
+		lineageTag: 3796bcf0-9981-4c66-bd2b-d9bebff4d3fe
+		summarizeBy: none
+		sourceColumn: category
+
+		annotation SummarizationSetBy = Automatic
+
+	partition DimProducto = m
+		mode: import
+		source =
+				let
+				    Origen = Csv.Document(File.Contents(RutaDatosBI & "\bi_products.csv"), [Delimiter=",", Columns=14, Encoding=65001, QuoteStyle=QuoteStyle.None]),
+				    #"Cambiar tipo" = Table.TransformColumnTypes(Origen,{{"Column1", type text}, {"Column2", type text}, {"Column3", type text}, {"Column4", type text}, {"Column5", type text}, {"Column6", type text}, {"Column7", type text}, {"Column8", type text}, {"Column9", type text}, {"Column10", type text}, {"Column11", type text}, {"Column12", type text}, {"Column13", type text}, {"Column14", type text}}),
+				    #"Encabezados promovidos" = Table.PromoteHeaders(#"Cambiar tipo", [PromoteAllScalars=true]),
+				    #"Tipo cambiado" = Table.TransformColumnTypes(#"Encabezados promovidos",{{"Item Purchased", type text}, {"category", type text}, {"primary_brand", type text}, {"transactions", Int64.Type}, {"unique_customers", Int64.Type}, {"units_sold", Int64.Type}, {"total_revenue", Int64.Type}, {"average_ticket", Int64.Type}, {"average_discount", Int64.Type}, {"average_rating", Int64.Type}, {"returned_transactions", Int64.Type}, {"transaction_share_pct", Int64.Type}, {"return_rate_pct", Int64.Type}, {"popularity_rank", Int64.Type}}),
+				    #"Otras columnas quitadas" = Table.SelectColumns(#"Tipo cambiado",{"Item Purchased", "category"})
+				in
+				    #"Otras columnas quitadas"
+
+	annotation PBI_NavigationStepName = Navegación
+
+	annotation PBI_ResultType = Table
+

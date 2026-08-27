@@ -1018,6 +1018,50 @@ De esta manera se evita utilizar información futura del período de evaluación
 
 El criterio debe diferenciarse de una garantía comercial: considerar un cliente inactivo según este corte constituye una regla operativa del proyecto y no implica afirmar que el cliente haya abandonado definitivamente la empresa.
 
+## Dashboard Power BI
+
+El proyecto incluye un dashboard interactivo de EDA y calidad desarrollado en Power BI y versionado mediante Power BI Project (PBIP).
+
+El proyecto se encuentra en:
+
+`dashboard/ReActiva_EDA_Quality.pbip`
+
+Actualmente contiene dos páginas:
+
+- `Resumen Ejecutivo`: KPIs generales, evolución temporal, distribución por categoría y canal, y métricas de calidad del dataset.
+- `Análisis Comercial`: rankings de productos, marcas y ubicaciones, estado y rango etario de clientes, y comportamiento por método de pago.
+
+### Generación de tablas para Power BI
+
+Las tablas utilizadas por el dashboard se generan de forma reproducible mediante:
+
+```bash
+python -m reactiva.data.build_bi_eda_tables
+```
+
+El proceso crea o reemplaza los siguientes archivos en `dashboard/data/`:
+
+- `bi_transactions.csv`
+- `bi_customers.csv`
+- `bi_products.csv`
+- `bi_calendar.csv`
+- `bi_quality_summary.csv`
+- `bi_quality_columns.csv`
+
+La generación reutiliza componentes canónicos del proyecto para validación y construcción de features, evitando duplicar lógica de negocio.
+
+### Configuración local de la fuente
+
+Las consultas de Power BI utilizan el parámetro `RutaDatosBI` como única ubicación base para los archivos CSV.
+
+Al trabajar desde una nueva máquina o desde otra ubicación del repositorio, debe modificarse una sola vez este parámetro desde Power Query para que apunte a la carpeta local:
+
+`dashboard/data`
+
+Los archivos locales de caché y configuración de Power BI (`localSettings.json` y `cache.abf`) no se versionan.
+
+La estrategia definitiva de publicación y distribución del dashboard se definirá separadamente de esta implementación local.
+
 ## Solución de problemas
 
 Los problemas técnicos confirmados durante el desarrollo, junto con su causa, solución, resultado y medidas de prevención, se documentan en:
