@@ -4,13 +4,17 @@ Proyecto Final de Data Science desarrollado por **GMJ Analytics**.
 
 ## Objetivo
 
-Desarrollar un sistema inteligente que permita:
+Desarrollar un sistema de recomendación orientado a la reactivación comercial que permita:
 
-- Estimar la probabilidad de recompra de un cliente dentro de 180 días.
-- Identificar clientes con riesgo de no volver a comprar.
-- Generar un ranking Top 5 de productos recomendados.
-- Incorporar contexto estacional y geográfico.
-- Convertir los resultados en acciones comerciales concretas.
+- Identificar clientes inactivos mediante la regla de negocio vigente de **270 días o más sin compras**.
+- Generar recomendaciones personalizadas de productos para incentivar una nueva compra.
+- Incorporar contexto estacional y geográfico como soporte del sistema de recomendación.
+- Aplicar mecanismos de fallback cuando no exista historial suficiente para una recomendación personalizada.
+- Convertir los resultados en acciones comerciales concretas y trazables.
+
+ReActiva **no estima una probabilidad binaria de recompra**.
+
+La condición de inactividad se determina mediante una regla observable basada en la fecha de última compra, mientras que los modelos del proyecto se utilizan para decidir **qué productos tiene sentido ofrecer a cada cliente** con el objetivo de incentivar su reactivación.
 
 ## Equipo
 
@@ -37,25 +41,39 @@ Este flujo permite mantener la trazabilidad de las tareas, los aportes individua
 
 ## Estado
 
-Proyecto en etapa inicial de configuración y preparación del repositorio.
+ReActiva se encuentra actualmente en una etapa avanzada de integración y cierre del MVP.
 
-pyproject.toml > archivo para la instalación del module reactivate |
+El proyecto cuenta con componentes funcionales de:
 
-                                                         |_ una vez se decarguen los archivos en local ejecutar en la terminar pip install e . esto permitira importar load_data.py desde cualquier lugar del proyecto debido a que reactiva estará instaldo en el env
+- carga y almacenamiento de datos;
+- auditoría y validación;
+- análisis exploratorio;
+- preparación de datos;
+- ingeniería de features;
+- comparación y evaluación de modelos de recomendación;
+- recomendación para clientes inactivos;
+- contexto y mecanismos de fallback;
+- aplicación interactiva mediante Streamlit;
+- almacenamiento y persistencia en AWS S3;
+- logging estructurado;
+- pruebas automáticas;
+- ejecución mediante Docker;
+- generación reproducible de tablas para Power BI;
+- dashboard inicial de Power BI.
 
-### Estado actual del desarrollo
+Las principales tareas restantes se concentran en la consolidación del ranking comercial final, automatización del flujo de reactivación, monitoreo, pipeline end-to-end, ampliación de Power BI y preparación de la entrega final.
 
-Desde la creación de esta descripción inicial, el proyecto avanzó sobre la estructura base y actualmente cuenta con componentes funcionales de preparación de datos, análisis exploratorio, ingeniería de features, modelado, recomendación, validación, aplicación interactiva, almacenamiento en AWS S3, logging estructurado, pruebas automáticas y ejecución mediante Docker.
+### Instalación del paquete local
 
-El archivo `pyproject.toml` continúa siendo utilizado para definir el paquete `reactiva` bajo la estructura `src/`.
+El archivo `pyproject.toml` define el paquete `reactiva` bajo la estructura `src/`.
 
-La instalación editable utilizada actualmente puede realizarse desde la raíz del repositorio mediante:
+La instalación editable puede realizarse desde la raíz del repositorio mediante:
 
 ```bash
 python -m pip install -e .
 ```
 
-Esto permite importar los módulos del paquete `reactiva` desde distintos componentes del proyecto sin depender de rutas manuales.
+Esto permite importar los módulos del paquete `reactiva` desde distintos componentes del proyecto sin depender de modificaciones manuales de rutas.
 
 Por ejemplo:
 
@@ -63,7 +81,7 @@ Por ejemplo:
 from reactiva.data.load_data import load_data
 ```
 
-La lógica reutilizable del proyecto se encuentra centralizada principalmente en:
+La lógica reutilizable del proyecto se centraliza principalmente en:
 
 ```text
 src/reactiva/
@@ -71,7 +89,7 @@ src/reactiva/
 
 evitando, cuando es posible, mantener implementaciones duplicadas entre notebooks, Streamlit y los módulos productivos.
 
-### Arquitectura actual del repositorio
+## Arquitectura actual del repositorio
 
 La estructura principal del proyecto es actualmente:
 
@@ -80,7 +98,7 @@ ReActiva-recommender/
 │
 ├── .github/
 │
-├── api/
+├── api/                  # placeholder legado pendiente de eliminación
 │
 ├── app/
 │   ├── app.py
@@ -89,6 +107,8 @@ ReActiva-recommender/
 ├── artifacts/
 │
 ├── dashboard/
+│   ├── ReActiva_EDA_Quality.pbip
+│   └── data/
 │
 ├── data/
 │
@@ -110,6 +130,7 @@ ReActiva-recommender/
 │       │
 │       ├── data/
 │       │   ├── audit_data.py
+│       │   ├── build_bi_eda_tables.py
 │       │   ├── load_data.py
 │       │   ├── save_results.py
 │       │   └── validate_data.py
@@ -127,6 +148,8 @@ ReActiva-recommender/
 │       │   └── train.py
 │       │
 │       ├── monitoring/
+│       │   ├── data_quality.py
+│       │   └── drift.py
 │       │
 │       ├── pipeline/
 │       │   └── run_pipeline.py
@@ -145,13 +168,54 @@ ReActiva-recommender/
 └── README.md
 ```
 
-Algunas carpetas y archivos forman parte de la arquitectura objetivo del proyecto y todavía no contienen su implementación definitiva.
+Algunas carpetas y archivos forman parte de responsabilidades todavía pendientes del MVP y no contienen aún su implementación definitiva.
 
-En particular, las áreas de API, Power BI, backtesting productivo y otros componentes del pipeline continúan desarrollándose mediante las Issues correspondientes.
+La carpeta `api/` permanece temporalmente en el repositorio únicamente como placeholder legado de la planificación inicial.
 
-### Flujo técnico actual
+La decisión arquitectónica vigente es **no desarrollar una API independiente dentro del MVP y utilizar Streamlit como aplicación/demo funcional**.
 
-El flujo general implementado puede representarse de la siguiente manera:
+La eliminación física del placeholder `api/` se realizará mediante el flujo normal de rama, commit, Pull Request y revisión.
+
+## Decisión de arquitectura: Streamlit como aplicación funcional del MVP
+
+Durante la planificación inicial de ReActiva se contempló implementar una API independiente además de Streamlit.
+
+Luego de revisar el alcance funcional vigente, el estado real del producto y los criterios de evaluación del Proyecto Final, el equipo decidió **no incorporar una API REST independiente dentro del MVP**.
+
+Streamlit será la aplicación/demo funcional utilizada para exponer las capacidades de ReActiva.
+
+La lógica de negocio, preparación de datos, features y recomendación permanece centralizada en módulos reutilizables dentro de:
+
+```text
+src/reactiva/
+```
+
+De esta manera, Streamlit funciona como capa de interacción sin convertirse en la ubicación exclusiva de la lógica del sistema.
+
+Esta decisión permite:
+
+- evitar una capa adicional de infraestructura sin una necesidad funcional concreta;
+- reducir duplicación de lógica;
+- reducir puntos de fallo y complejidad de despliegue;
+- simplificar pruebas y mantenimiento del MVP;
+- concentrar el desarrollo restante en funcionalidades directamente relacionadas con el objetivo de negocio;
+- mantener la arquitectura preparada para incorporar una API posteriormente si aparece una necesidad real de integración externa.
+
+Como consecuencia de esta decisión:
+
+- Streamlit se adopta como aplicación/demo funcional del MVP;
+- no se desarrollarán endpoints REST dentro del alcance actual;
+- la lógica reutilizable debe permanecer desacoplada de Streamlit dentro de `src/reactiva`;
+- el placeholder `api/` será retirado del repositorio;
+- las Issues exclusivamente asociadas a la API serán cerradas como `Not planned`;
+- las Issues mixtas que continúen aportando valor serán reformuladas para referirse a Streamlit, al pipeline o a la activación comercial según corresponda;
+- una futura API podrá incorporarse como evolución del producto si surge una necesidad concreta de integración con sistemas externos.
+
+Esta decisión representa una **reducción deliberada de complejidad arquitectónica**, no una limitación accidental del desarrollo.
+
+## Flujo técnico actual
+
+El flujo funcional vigente puede representarse de la siguiente manera:
 
 ```text
 Dataset histórico
@@ -176,30 +240,55 @@ Ingeniería de features
         ├──────────────► Análisis de factibilidad
         │
         ▼
-Modelado y recomendación
+Identificación de clientes inactivos
+        │
+        │  regla: >= 270 días sin compras
+        │
+        ▼
+Sistema de recomendación
         │
         ├── User-Based Collaborative Filtering
-        ├── Frequency-weighted User-Based
-        ├── Content-Based
-        ├── Popularity
-        ├── Item-Based Collaborative Filtering
-        ├── Classification
-        └── Hybrid
+        │      modelo principal seleccionado
+        │
+        └── Fallback contextual
+               │
+               ├── season + Location
+               ├── Location
+               ├── season
+               └── Global
         │
         ▼
-Contexto y mecanismos de fallback
+Recomendaciones de productos
         │
         ▼
-Streamlit
-        │
-        ▼
-Interacción comercial / CRM
+Streamlit / activación comercial
         │
         ▼
 Resultados, S3 y logging
+        │
+        ▼
+Power BI / seguimiento
 ```
 
-### Fuente de datos
+La lógica central del producto es:
+
+```text
+Historial de compras
+        ↓
+¿Cliente inactivo >= 270 días?
+        ↓
+Sí
+        ↓
+¿Qué productos tiene sentido ofrecerle?
+        ↓
+Recomendaciones
+        ↓
+Acción de reactivación
+```
+
+El proyecto no intenta determinar mediante un clasificador binario si el cliente volverá o no a comprar.
+
+## Fuente de datos
 
 La fuente principal de información del proyecto se encuentra almacenada en Amazon S3.
 
@@ -217,7 +306,7 @@ La configuración general se centraliza en:
 src/reactiva/config.py
 ```
 
-Actualmente se utilizan variables de entorno como:
+Entre las variables de entorno actualmente contempladas se encuentran:
 
 ```text
 DATASET_URI
@@ -229,6 +318,8 @@ USUARIO_ADMIN
 PASSWORD_ADMIN
 ```
 
+Algunas configuraciones podrán ser revisadas o retiradas durante la limpieza final si dejan de ser necesarias para la arquitectura definitiva.
+
 Las credenciales, contraseñas, API keys, tokens y secretos no deben almacenarse directamente en el código ni versionarse en GitHub.
 
 El archivo privado:
@@ -239,7 +330,7 @@ El archivo privado:
 
 debe mantenerse fuera del repositorio.
 
-### Auditoría del dataset
+## Auditoría del dataset
 
 El proyecto cuenta con una auditoría automatizada implementada en:
 
@@ -267,7 +358,7 @@ El objetivo de esta etapa es cuantificar la calidad de los datos antes de aplica
 
 Los valores extremos detectados no se eliminan automáticamente únicamente por tratarse de outliers estadísticos, ya que un valor extremo no necesariamente representa un dato incorrecto.
 
-### Validación y preparación reproducible
+## Validación y preparación reproducible
 
 La lógica de validación y preparación se encuentra principalmente en:
 
@@ -289,7 +380,7 @@ Actualmente se contemplan controles relacionados con:
 - reglas particulares para compras online y offline;
 - detección y tratamiento de duplicados.
 
-La estrategia de deduplicación fue ajustada para incorporar:
+La estrategia de deduplicación incorpora:
 
 ```text
 Transaction ID
@@ -301,7 +392,63 @@ Esto evita considerar erróneamente como duplicadas compras legítimas realizada
 
 La preparación actual conserva las 10.000 transacciones válidas del dataset.
 
-### Análisis exploratorio de datos
+## Actualización del dataset
+
+El dataset actual incorpora los campos:
+
+```text
+Customer Full Name
+Customer Email
+```
+
+para que el flujo de reactivación pueda identificar al cliente de forma legible y disponer de un medio de contacto.
+
+Estos campos fueron incorporados de forma sintética con fines operativos del proyecto:
+
+- `Customer Full Name`: permite identificar al cliente más allá de su `Customer ID`.
+- `Customer Email`: permite representar el canal de contacto necesario para una acción de reactivación.
+
+El dataset vigente contiene:
+
+- **10.000 filas**;
+- **27 columnas**;
+- **3.291 clientes únicos**.
+
+El esquema actual ya no incluye:
+
+```text
+Frequency of Purchases
+```
+
+Esta modificación fue incorporada a los procesos de auditoría, validación, preparación, documentación y análisis que consumen el dataset.
+
+El diccionario de datos actualizado se encuentra disponible en:
+
+[`docs/data_dictionary.csv`](docs/data_dictionary.csv)
+
+Los campos `Customer Full Name` y `Customer Email` deben considerarse variables operativas incorporadas para representar el flujo de contacto y no variables originales obtenidas del dataset fuente.
+
+## Criterio actual de inactividad
+
+El criterio vigente del proyecto para considerar a un cliente inactivo es:
+
+```text
+days_since_last_purchase >= 270
+```
+
+Es decir, **270 días o más desde su última compra**.
+
+Este criterio reemplaza el horizonte de 180 días contemplado durante etapas iniciales del proyecto.
+
+Las referencias históricas a 180 días corresponden a una versión anterior del alcance y no representan la lógica funcional vigente.
+
+El criterio de 270 días constituye una **regla operativa observable** y no la salida de un modelo predictivo.
+
+Un cliente que cumple esta condición puede ser considerado candidato para una acción de reactivación.
+
+Esto no implica afirmar que el cliente haya abandonado definitivamente la empresa ni garantiza que vaya a volver a comprar.
+
+## Análisis exploratorio de datos
 
 El EDA reproducible se encuentra en:
 
@@ -354,7 +501,7 @@ El producto individual más frecuente representa aproximadamente el 8,7 % de las
 
 Los resultados del EDA se mantienen como evidencia descriptiva y no se interpretan automáticamente como relaciones causales.
 
-### Análisis de factibilidad del recomendador
+## Análisis de factibilidad del recomendador
 
 El análisis de factibilidad se encuentra documentado en:
 
@@ -391,9 +538,9 @@ Esto indica que existe información suficiente para construir mecanismos de pers
 
 Por esta razón el sistema contempla mecanismos de fallback para escenarios donde la información individual disponible no sea suficiente.
 
-El catálogo actual utilizado en estos análisis contiene 24 productos.
+El catálogo utilizado en estos análisis contiene 24 productos.
 
-### Construcción centralizada de features
+## Construcción centralizada de features
 
 Las features derivadas utilizadas por diferentes componentes del proyecto se centralizan en:
 
@@ -410,7 +557,7 @@ season
 age_group
 ```
 
-#### season
+### season
 
 La variable:
 
@@ -431,7 +578,7 @@ Los valores estandarizados son:
 - `monsoon`;
 - `post-monsoon`.
 
-#### age_group
+### age_group
 
 La variable:
 
@@ -451,7 +598,7 @@ La documentación técnica detallada se encuentra en:
 
 [`docs/context_features.md`](docs/context_features.md)
 
-### Uso de Location
+## Uso de Location
 
 La variable:
 
@@ -470,7 +617,7 @@ No debe interpretarse como:
 
 Su utilización permite estudiar y aprovechar diferencias observadas entre las ubicaciones existentes dentro del dataset.
 
-### Modelado y comparación de recomendadores
+## Modelado y comparación de recomendadores
 
 La comparación principal de modelos se encuentra en:
 
@@ -478,7 +625,7 @@ La comparación principal de modelos se encuentra en:
 src/reactiva/modeling/model_comparasion_270day_metrics_updated_threshold_070.ipynb
 ```
 
-El notebook evalúa los distintos modelos utilizando una misma separación temporal para asegurar una comparación consistente.
+El notebook evalúa distintos enfoques utilizando una misma separación temporal para asegurar una comparación consistente.
 
 La evaluación actual utiliza:
 
@@ -491,9 +638,11 @@ La partición resultante contiene:
 
 - 6.281 filas de entrenamiento;
 - 3.719 filas de holdout;
-- 1.877 clientes presentes tanto en entrenamiento como en holdout y, por lo tanto, disponibles para evaluación.
+- 1.877 clientes presentes tanto en entrenamiento como en holdout y disponibles para evaluación.
 
-El período final de 270 días se utiliza como holdout para evaluación.
+El período final de 270 días se reserva como holdout.
+
+La información posterior al corte no es utilizada para construir las recomendaciones evaluadas.
 
 Actualmente se comparan los siguientes enfoques:
 
@@ -504,6 +653,8 @@ Actualmente se comparan los siguientes enfoques:
 5. Item-Based Collaborative Filtering.
 6. Classification.
 7. Hybrid User-Based CF + Popularity Fallback.
+
+Los enfoques anteriores forman parte de la comparación experimental y no representan necesariamente componentes simultáneos del sistema productivo.
 
 Los resultados principales registrados para Top 5 son:
 
@@ -533,7 +684,41 @@ También se incorporan métricas como:
 
 Esto permite evaluar los modelos desde diferentes perspectivas y no únicamente por la cantidad de coincidencias entre productos recomendados y compras futuras.
 
-### Optimización mediante Optuna
+### Modelo seleccionado
+
+Aunque el modelo de popularidad obtuvo mejores métricas globales en algunas dimensiones, concentra sus recomendaciones en los productos más populares y presenta un desempeño limitado respecto de diversidad y long tail.
+
+Por este motivo se seleccionó:
+
+```text
+User-Based Collaborative Filtering
+```
+
+como recomendador principal.
+
+La decisión busca equilibrar:
+
+- capacidad predictiva;
+- personalización;
+- diversidad;
+- exposición a productos menos populares;
+- utilidad comercial del ranking.
+
+## Enfoque de clasificación
+
+Dentro de la comparación existe también un enfoque denominado:
+
+```text
+Classification
+```
+
+Este componente **no predice si un cliente recomprará o no**.
+
+Su objetivo experimental es estimar una categoría futura relevante para el cliente y utilizar esa información como señal de recomendación.
+
+Por lo tanto, su presencia en los notebooks de modelado no contradice la decisión de no utilizar un modelo binario de propensión de recompra.
+
+## Optimización mediante Optuna
 
 El proyecto incorpora optimización de hiperparámetros mediante:
 
@@ -553,7 +738,7 @@ Actualmente se optimiza el:
 GradientBoostingClassifier
 ```
 
-utilizado dentro del enfoque de clasificación.
+utilizado dentro del enfoque experimental de clasificación para recomendación.
 
 La optimización mantiene:
 
@@ -563,7 +748,7 @@ La optimización mantiene:
 
 La ejecución registrada utiliza 100 trials.
 
-El mejor trial obtenido registró aproximadamente:
+El mejor trial registrado obtuvo aproximadamente:
 
 ```text
 Precision@5: 0.1135
@@ -571,9 +756,7 @@ Recall@5:    0.3512
 HitRate@5:   0.4823
 ```
 
-Los hiperparámetros encontrados pueden posteriormente compararse contra el modelo base utilizando el mismo marco de evaluación.
-
-### Recomendador canónico
+## Recomendador canónico
 
 La implementación reutilizable del recomendador se encuentra centralizada en:
 
@@ -591,17 +774,35 @@ User-Based Collaborative Filtering
 
 basada en similitud entre clientes.
 
+El flujo identifica clientes inactivos según el criterio vigente y genera recomendaciones utilizando información histórica disponible.
+
 También se dispone de recomendación mediante similitud de productos a través de:
 
 ```python
 get_recommendations_items()
 ```
 
-utilizada actualmente por Streamlit.
+utilizada por componentes interactivos del proyecto.
 
-La matriz de similitud de productos se carga cuando es requerida y puede mantenerse en memoria durante la ejecución, evitando realizar una carga automática innecesaria al importar el módulo.
+La matriz de similitud se carga cuando es requerida y puede mantenerse en memoria durante la ejecución.
 
-### Contexto y fallback
+### Evolución pendiente del ranking comercial
+
+La salida final del recomendador debe evolucionar hacia una separación explícita entre:
+
+```text
+Top 3 de alta afinidad
++
+hasta Top 3 de oportunidad
+```
+
+Las recomendaciones de oportunidad estarán orientadas a productos de menor rotación únicamente cuando exista una señal real de afinidad con el cliente.
+
+Un producto no deberá ser recomendado únicamente por pertenecer al long tail.
+
+Esta evolución forma parte del trabajo pendiente del ranking comercial final.
+
+## Contexto y fallback
 
 La lógica contextual se encuentra en:
 
@@ -638,9 +839,7 @@ season
 Global
 ```
 
-El fallback puede completar progresivamente el Top K utilizando más de un nivel.
-
-Los productos incorporados no se repiten.
+El fallback funciona como mecanismo de cobertura cuando el recomendador principal no dispone de candidatos utilizables.
 
 La función contextual devuelve además información de trazabilidad que permite identificar:
 
@@ -650,9 +849,7 @@ La función contextual devuelve además información de trazabilidad que permite
 - motivo por el cual se utilizó o descartó;
 - productos incorporados desde ese nivel.
 
-Esta trazabilidad permite posteriormente explicar de qué forma se construyó una recomendación.
-
-### Cobertura funcional del recomendador
+## Cobertura funcional del recomendador
 
 Durante las validaciones realizadas sobre el criterio vigente de 270 días se identificaron:
 
@@ -666,11 +863,11 @@ y el flujo de recomendación consiguió obtener recomendaciones para todos ellos
 0 clientes sin recomendación
 ```
 
-Este resultado representa una validación de cobertura funcional.
+Este resultado representa una validación de **cobertura funcional**.
 
 No debe interpretarse como efectividad comercial real ni como garantía de que cada recomendación vaya a producir una compra.
 
-### Streamlit
+## Streamlit
 
 La aplicación interactiva del proyecto se encuentra en:
 
@@ -684,23 +881,25 @@ y está desarrollada utilizando:
 Streamlit
 ```
 
-La aplicación funciona como interfaz de interacción con diferentes componentes de ReActiva.
+Streamlit constituye la **aplicación/demo funcional del MVP**.
+
+La aplicación permite interactuar con diferentes componentes de ReActiva sin trasladar la lógica de negocio principal fuera de los módulos reutilizables de `src/reactiva`.
 
 Actualmente contiene áreas para:
 
-1. Indexación individual.
-2. Carga masiva.
-3. Explorador 360 y CRM.
-4. Auditoría y logs para usuarios con acceso administrativo.
+1. interacción individual;
+2. carga masiva;
+3. explorador 360 y CRM;
+4. auditoría y logs para usuarios con acceso administrativo.
 
-#### Indexación individual
+### Interacción individual
 
 La aplicación permite trabajar tanto con:
 
 - clientes existentes;
 - perfiles nuevos sin historial.
 
-Se solicitan datos relacionados con:
+Se utilizan datos relacionados con:
 
 - perfil;
 - edad;
@@ -713,19 +912,19 @@ Se solicitan datos relacionados con:
 - canal de venta;
 - variables operativas.
 
-Para clientes sin historial, donde un recomendador colaborativo no dispone todavía de información individual suficiente, se utiliza una estrategia inicial de cold start basada en características contextuales disponibles.
+Para perfiles sin historial suficiente, donde un recomendador colaborativo no dispone de información individual, se utilizan mecanismos de fallback basados en la información disponible.
 
-#### Carga masiva
+### Carga masiva
 
 Streamlit permite trabajar con conjuntos de transacciones y aplicar controles de validación antes de continuar con el flujo.
 
-Los datos pueden posteriormente almacenarse en S3 cuando la configuración y permisos disponibles lo permiten.
+Los datos pueden almacenarse en S3 cuando la configuración y los permisos disponibles lo permiten.
 
-#### Explorador 360 y CRM
+### Explorador 360 y CRM
 
 La aplicación dispone de una vista orientada al análisis individual de clientes.
 
-Entre las métricas actualmente calculadas se encuentran:
+Entre las métricas calculadas se encuentran:
 
 - cantidad de compras;
 - gasto total;
@@ -736,9 +935,9 @@ Entre las métricas actualmente calculadas se encuentran:
 - última compra;
 - días de inactividad;
 - historial de compras;
-- nivel asociado al criterio de inactividad.
+- estado asociado al criterio de inactividad.
 
-### Logging estructurado
+## Logging estructurado
 
 El sistema de logging se encuentra implementado en:
 
@@ -748,7 +947,7 @@ src/reactiva/utils/logger.py
 
 Los registros se generan en formato JSON.
 
-Actualmente pueden escribirse:
+Pueden escribirse:
 
 - en consola;
 - en archivos persistentes dentro de `artifacts/logs`.
@@ -773,7 +972,7 @@ access_key
 credential
 ```
 
-Cuando se detectan estos campos, su valor se reemplaza en los logs por:
+Cuando se detectan estos campos, su valor se reemplaza por:
 
 ```text
 [REDACTED]
@@ -781,7 +980,7 @@ Cuando se detectan estos campos, su valor se reemplaza en los logs por:
 
 Esto reduce el riesgo de que credenciales o secretos aparezcan accidentalmente en registros del sistema.
 
-### AWS S3
+## AWS S3
 
 Amazon S3 forma parte de la arquitectura actual de ReActiva.
 
@@ -796,7 +995,76 @@ La comunicación con AWS se realiza utilizando configuración y credenciales ext
 
 Las credenciales nunca deben incorporarse dentro de archivos versionados en GitHub.
 
-### Dependencias
+## Power BI
+
+El proyecto incluye un dashboard interactivo de EDA y calidad desarrollado en Power BI y versionado mediante Power BI Project (PBIP).
+
+El proyecto se encuentra en:
+
+```text
+dashboard/ReActiva_EDA_Quality.pbip
+```
+
+Actualmente contiene dos páginas principales:
+
+- `Resumen Ejecutivo`: KPIs generales, evolución temporal, distribución por categoría y canal, y métricas de calidad del dataset.
+- `Análisis Comercial`: rankings de productos, marcas y ubicaciones, estado y rango etario de clientes, y comportamiento por método de pago.
+
+El dashboard continuará evolucionando para incorporar información relacionada con:
+
+- clientes candidatos a reactivación;
+- recomendaciones;
+- productos;
+- oportunidades comerciales;
+- métricas del sistema;
+- seguimiento del flujo de reactivación.
+
+### Generación de tablas para Power BI
+
+Las tablas utilizadas por el dashboard se generan de forma reproducible mediante:
+
+```bash
+python -m reactiva.data.build_bi_eda_tables
+```
+
+El proceso crea o reemplaza archivos dentro de:
+
+```text
+dashboard/data/
+```
+
+Entre ellos:
+
+- `bi_transactions.csv`;
+- `bi_customers.csv`;
+- `bi_products.csv`;
+- `bi_calendar.csv`;
+- `bi_quality_summary.csv`;
+- `bi_quality_columns.csv`.
+
+La generación reutiliza componentes canónicos del proyecto para validación y construcción de features, evitando duplicar lógica de negocio.
+
+### Configuración local de la fuente
+
+Las consultas de Power BI utilizan el parámetro:
+
+```text
+RutaDatosBI
+```
+
+como ubicación base para los archivos CSV.
+
+Al trabajar desde una nueva máquina o ubicación del repositorio debe modificarse este parámetro para que apunte a:
+
+```text
+dashboard/data
+```
+
+Los archivos locales de caché y configuración de Power BI no se versionan.
+
+La estrategia definitiva de publicación y distribución del dashboard se definirá de acuerdo con el alcance final de la entrega.
+
+## Dependencias
 
 El archivo canónico de dependencias del proyecto es:
 
@@ -808,7 +1076,7 @@ ubicado en la raíz del repositorio.
 
 Se eliminaron listas de dependencias duplicadas para evitar diferencias entre componentes del proyecto.
 
-Entre las principales tecnologías presentes actualmente se encuentran:
+Entre las principales tecnologías presentes se encuentran:
 
 - Python;
 - pandas;
@@ -823,12 +1091,13 @@ Entre las principales tecnologías presentes actualmente se encuentran:
 - seaborn;
 - Optuna;
 - pytest;
-- python-dotenv;
-- Uvicorn.
+- python-dotenv.
 
-`Uvicorn` permanece como dependencia disponible para una futura implementación de API, pero actualmente no se utiliza para ejecutar `app.py`, ya que la aplicación existente está desarrollada con Streamlit.
+`Uvicorn` continúa actualmente presente entre las dependencias históricas del entorno, aunque **no forma parte de la arquitectura funcional del MVP ni es necesario para ejecutar Streamlit**.
 
-### Instalación del entorno
+Su permanencia será revisada durante la limpieza final de dependencias junto con cualquier otra librería que haya dejado de ser utilizada.
+
+## Instalación del entorno
 
 Se recomienda trabajar dentro de un entorno virtual.
 
@@ -856,7 +1125,7 @@ y el paquete local:
 python -m pip install -e .
 ```
 
-### Ejecución de Streamlit
+## Ejecución de Streamlit
 
 Con el entorno configurado y las variables necesarias disponibles:
 
@@ -864,9 +1133,9 @@ Con el entorno configurado y las variables necesarias disponibles:
 streamlit run app/app.py
 ```
 
-### Docker
+## Docker
 
-El proyecto cuenta actualmente con una configuración funcional de Docker.
+El proyecto cuenta con una configuración funcional de Docker para la aplicación Streamlit.
 
 El archivo correspondiente se encuentra en:
 
@@ -882,7 +1151,7 @@ python:3.11-slim
 
 e instala las dependencias desde el `requirements.txt` ubicado en la raíz.
 
-La imagen puede construirse desde la raíz del repositorio mediante:
+La imagen puede construirse desde la raíz mediante:
 
 ```bash
 docker build -f app/Dockerfile -t reactiva-local .
@@ -900,7 +1169,7 @@ El puerto expuesto es:
 8501
 ```
 
-Una ejecución local utilizando variables de entorno externas puede realizarse, por ejemplo, mediante:
+Una ejecución local utilizando variables de entorno externas puede realizarse mediante:
 
 ```bash
 docker run --rm -p 8501:8501 --env-file .env reactiva-local
@@ -914,7 +1183,7 @@ http://localhost:8501
 
 Las variables privadas y credenciales deben proporcionarse al contenedor de forma externa y nunca incorporarse dentro de la imagen Docker.
 
-### Validaciones y pruebas
+## Validaciones y pruebas
 
 El proyecto cuenta con pruebas automáticas dentro de:
 
@@ -922,7 +1191,7 @@ El proyecto cuenta con pruebas automáticas dentro de:
 tests/
 ```
 
-Actualmente se validan componentes relacionados con:
+Actualmente existen validaciones relacionadas con:
 
 - preparación de datos;
 - deduplicación;
@@ -934,141 +1203,64 @@ Actualmente se validan componentes relacionados con:
 - fallback;
 - ausencia de productos repetidos.
 
-Después de la integración más reciente de features contextuales, recomendador y Docker, la suite completa registró:
+También fueron realizadas validaciones sobre:
 
-```text
-19 passed
-```
-
-También fueron validados:
-
-- imports del recomendador sin ejecuciones automáticas;
+- imports del recomendador sin ejecuciones automáticas innecesarias;
 - ejecución de notebooks desde un kernel limpio;
 - consistencia de las features centralizadas;
 - mantenimiento de la partición temporal;
-- mantenimiento de las métricas de comparación;
-- análisis de factibilidad después de la centralización de features;
-- `python -m pip check`;
+- métricas de comparación;
+- análisis de factibilidad;
+- dependencias mediante `python -m pip check`;
 - dependencias de AWS;
 - Optuna;
 - construcción de la imagen Docker;
 - ejecución del contenedor;
 - funcionamiento de Streamlit sobre el puerto 8501.
 
-### Componentes pendientes
+La cobertura de pruebas continuará ampliándose durante la integración final del pipeline y las funcionalidades pendientes.
 
-El repositorio también contiene componentes correspondientes a etapas que todavía deben continuar desarrollándose.
+## Componentes pendientes
 
-Entre los principales puntos pendientes se encuentran:
+El proyecto se encuentra en una etapa de integración y cierre, por lo que los principales puntos pendientes se concentran en finalizar y conectar componentes existentes.
 
-- backtesting histórico reproducible;
-- consolidación de tablas de resultados;
-- modelo de datos para Power BI;
-- dashboard de Power BI;
-- métricas y KPIs comerciales;
-- integración de outputs procesados con BI;
-- evolución del ranking comercial;
-- separación de recomendaciones de afinidad y oportunidades comerciales;
-- trazabilidad comercial adicional;
-- futura capa de API;
-- integración final de los componentes dentro del pipeline completo.
+Entre ellos:
 
-La presencia de carpetas o archivos preparados para estas funciones no implica que dichas funcionalidades estén finalizadas.
+- consolidación del ranking final de reactivación;
+- separación entre recomendaciones de alta afinidad y oportunidades comerciales;
+- reglas de exclusión y trazabilidad final del ranking;
+- automatización del flujo de reactivación;
+- generación de mensajes de contacto asociados a las recomendaciones;
+- registro del histórico de acciones de reactivación;
+- monitoreo de calidad de datos, categorías nuevas y drift;
+- integración del pipeline completo end-to-end;
+- pruebas de integración y automatización;
+- ampliación del dashboard de Power BI;
+- integración de outputs de reactivación con Power BI;
+- documentación final;
+- prueba end-to-end externa;
+- preparación de Demo 2 y release final.
 
-Su implementación definitiva debe realizarse mediante las Issues correspondientes y el flujo de revisión establecido por el equipo.
+La implementación definitiva de estos componentes debe realizarse mediante las Issues correspondientes y el flujo de revisión establecido por el equipo.
 
-## Actualización del dataset
+## Alcance fuera del MVP
 
-El dataset actual incorpora los campos `Customer Full Name` y `Customer Email` para que el flujo de reactivación pueda identificar al cliente de forma legible y disponer de un medio de contacto.
+Actualmente quedan fuera del alcance obligatorio del MVP:
 
-Estos dos campos fueron incorporados de forma sintética con fines operativos del proyecto:
+- modelo binario de probabilidad de recompra;
+- target supervisado de recompra;
+- API REST independiente;
+- extensiones experimentales que no aporten valor directo a la solución final.
 
-- `Customer Full Name`: permite identificar al cliente más allá de su `Customer ID`.
-- `Customer Email`: permite representar el canal de contacto necesario para una acción de reactivación.
+Estas decisiones buscan mantener el proyecto alineado con el problema de negocio y evitar agregar complejidad sin una necesidad funcional concreta.
 
-El dataset vigente contiene:
-
-- **10.000 filas**;
-- **27 columnas**;
-- **3.291 clientes únicos**.
-
-El esquema actual ya no incluye:
-
-```text
-Frequency of Purchases
-```
-
-Esta modificación fue incorporada también a los procesos de auditoría, validación, preparación, documentación y análisis que consumen el dataset.
-
-El diccionario de datos actualizado se encuentra disponible en:
-
-[`docs/data_dictionary.csv`](docs/data_dictionary.csv)
-
-Los campos `Customer Full Name` y `Customer Email` deben considerarse variables operativas incorporadas para hacer posible la representación del flujo de contacto con clientes y no variables originales obtenidas del dataset fuente.
-
-## Criterio actual de inactividad
-
-El criterio vigente del proyecto para considerar a un cliente inactivo es de **270 días**. Este valor reemplaza el criterio anterior de 180 días mencionado en documentación previa.
-
-El criterio anterior se mantiene visible dentro de la documentación histórica y del objetivo original del proyecto para conservar la trazabilidad de la evolución de la solución.
-
-La evaluación actual de los modelos utiliza además una separación temporal de 270 días, donde las compras del período final se reservan como holdout y la información anterior al corte se utiliza para construir las recomendaciones que luego son evaluadas.
-
-De esta manera se evita utilizar información futura del período de evaluación durante la construcción de las recomendaciones.
-
-El criterio debe diferenciarse de una garantía comercial: considerar un cliente inactivo según este corte constituye una regla operativa del proyecto y no implica afirmar que el cliente haya abandonado definitivamente la empresa.
-
-## Dashboard Power BI
-
-El proyecto incluye un dashboard interactivo de EDA y calidad desarrollado en Power BI y versionado mediante Power BI Project (PBIP).
-
-El proyecto se encuentra en:
-
-`dashboard/ReActiva_EDA_Quality.pbip`
-
-Actualmente contiene dos páginas:
-
-- `Resumen Ejecutivo`: KPIs generales, evolución temporal, distribución por categoría y canal, y métricas de calidad del dataset.
-- `Análisis Comercial`: rankings de productos, marcas y ubicaciones, estado y rango etario de clientes, y comportamiento por método de pago.
-
-### Generación de tablas para Power BI
-
-Las tablas utilizadas por el dashboard se generan de forma reproducible mediante:
-
-```bash
-python -m reactiva.data.build_bi_eda_tables
-```
-
-El proceso crea o reemplaza los siguientes archivos en `dashboard/data/`:
-
-- `bi_transactions.csv`
-- `bi_customers.csv`
-- `bi_products.csv`
-- `bi_calendar.csv`
-- `bi_quality_summary.csv`
-- `bi_quality_columns.csv`
-
-La generación reutiliza componentes canónicos del proyecto para validación y construcción de features, evitando duplicar lógica de negocio.
-
-### Configuración local de la fuente
-
-Las consultas de Power BI utilizan el parámetro `RutaDatosBI` como única ubicación base para los archivos CSV.
-
-Al trabajar desde una nueva máquina o desde otra ubicación del repositorio, debe modificarse una sola vez este parámetro desde Power Query para que apunte a la carpeta local:
-
-`dashboard/data`
-
-Los archivos locales de caché y configuración de Power BI (`localSettings.json` y `cache.abf`) no se versionan.
-
-La estrategia definitiva de publicación y distribución del dashboard se definirá separadamente de esta implementación local.
+Una funcionalidad excluida del MVP puede retomarse en una evolución futura si aparece evidencia o una necesidad de producto que lo justifique.
 
 ## Solución de problemas
 
 Los problemas técnicos confirmados durante el desarrollo, junto con su causa, solución, resultado y medidas de prevención, se documentan en:
 
 [`docs/troubleshooting/README.md`](docs/troubleshooting/README.md)
-
-Este documento se utiliza para registrar incidencias técnicas reales detectadas durante el desarrollo y evitar que los mismos problemas vuelvan a repetirse.
 
 Cada incidencia documentada debe incluir, cuando corresponda:
 
@@ -1088,7 +1280,7 @@ Entre los problemas ya identificados durante el desarrollo se encuentran situaci
 - compatibilidad de dependencias de AWS;
 - duplicación de archivos de dependencias;
 - duplicación de implementaciones del recomendador;
-- diferencias entre el runtime de Streamlit y una futura API;
-- centralización del código utilizado por Docker y Streamlit.
+- diferencias históricas entre la arquitectura inicialmente planificada y la arquitectura final basada en Streamlit;
+- centralización del código reutilizado por Docker, Streamlit y los módulos internos.
 
 La documentación de troubleshooting complementa al README principal: el README describe el estado y funcionamiento general del proyecto, mientras que `docs/troubleshooting/README.md` conserva el historial técnico de problemas confirmados y sus soluciones.
