@@ -7,10 +7,10 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 from dotenv import load_dotenv
-from reactiva.config import AWS_REGION, DATASET_URI, S3_BUCKET, USUARIO_ADMIN, PASSWORD_ADMIN
-from reactiva.utils.logger import log_event, setup_logger
-from reactiva.recommender.recommender import get_recommendations_items
-from reactiva.data.validate_data import FULL_DEFAULT_STRATEGY, DataValidator
+from src.reactiva.config import AWS_REGION, DATASET_URI, S3_BUCKET, USUARIO_ADMIN, PASSWORD_ADMIN
+from src.reactiva.utils.logger import log_event, setup_logger
+from src.reactiva.recommender.recommender import get_recommendations_items
+from src.reactiva.data.validate_data import FULL_DEFAULT_STRATEGY, DataValidator
 
 load_dotenv()
 logger = setup_logger(name='reactiva.app.streamlit')
@@ -29,7 +29,7 @@ CAMPOS_MODELO = [
     'Item Purchased',
 ]
 
-#campos que se registran para completar el dataset pero no aportan valor predictivo real
+#campos que se registran como detalles de la compra
 CAMPOS_OPERATIVOS = [
     'Color',
     'Size',
@@ -44,8 +44,6 @@ CAMPOS_OPERATIVOS = [
     'Payment Method',
     'Review Rating',
     'Return Status',
-    'Previous Purchases',
-    'Online Store',
 ]
 
 #campos que solo tienen sentido en una venta online
@@ -59,11 +57,10 @@ CAMPOS_SOLO_ONLINE = [
 
 #valores con los que se completan esos campos cuando la venta es offline
 DEFAULTS_OFFLINE = {
-    'Online Store': 'N/A',
     'Shipping Charge (₹)': 0,
-    'Delivery Speed': 'In Store',
+    'Delivery Speed': 'N/A (Offline)',
     'Delivery Time (Days)': 0,
-    'Review Rating': 0,
+    'Review Rating': np.nan,
 }
 
 
@@ -91,8 +88,6 @@ ESTRATEGIA_INDIVIDUAL = {
 
 DIAS_CHURN = 270  # mismo corte que usa el recomendador
 
-if "usuario" not in st.session_state:
-    st.session_state["usuario"] = ""
 
 #funciones para la estructura de la pagina:
 
@@ -104,7 +99,6 @@ def cargar_dataset() -> pd.DataFrame:
         df = pd.read_csv(DATASET_URI)
     except Exception as e:
         print('No se pudo cargar el dataset en la nube, intentando conexion con el respaldo local.')
-        df = pd.read_csv("src/reactiva/customer_shopping_behavior.csv")
     df['Purchase Date'] = pd.to_datetime(df['Purchase Date'], errors='coerce')
     return df
 
@@ -187,18 +181,24 @@ def campo_numerico(columna: str, etiqueta: str = None):
     return st.number_input(etiqueta, min_value=minimo, max_value=maximo, value=defecto)
 
 
-def obtener_recomendacion(Item_purchased):
+def obtener_recomendacion_item(item_purchased):
     """
-    Envuelve get_recommendations_items (item-based) para poder mostrar
-    el resultado en pantalla. Recibe un item, no un Customer ID.
+    Genera recomendaciones item-based a partir del producto
+    que el cliente está comprando actualmente.
     """
     try:
-        recomendacion = get_recommendations_items(Item_purchased)
+        recomendacion = get_recommendations_items(
+            item_purchased,
+            top_n=5
+        )
+
     except Exception as error:
-        return None, f'El recomendador fallo: {error}'
+        return None, f"El recomendador falló: {error}"
 
     if not recomendacion:
-        return None, 'Sin items similares suficientes para este item.'
+        return None, (
+            "Sin items similares suficientes para este producto."
+        )
 
     return recomendacion, None
 
@@ -290,7 +290,7 @@ def metricas_cliente(df: pd.DataFrame, customer_id) -> dict:
         'ciudad': historial['Location'].mode().iloc[0],
         'ultima': ultima,
         'dias_inactivo': dias_inactivo,
-        'churn': 'Alto' if dias_inactivo > DIAS_CHURN else 'Bajo',
+        'actividad': 'Bajo' if dias_inactivo > DIAS_CHURN else 'Alto',
         'historial': historial.sort_values('Purchase Date', ascending=False),
     }
 
@@ -389,16 +389,30 @@ with tabs[0]:
         st.subheader('👤 Perfil')
 
         if modo == 'Cliente existente' and df_historico is not None:
-            clientes = sorted(df_historico['Customer ID'].dropna().unique().tolist())
-            customer_id = st.selectbox('ID del Cliente', options=clientes)
+            clientes = sorted(df_historico['Customer Full Name'].dropna().unique().tolist())
+            customer_name = st.selectbox('Nombre Completo', options=clientes)
+            customer_id = df_historico.loc[df_historico['Customer Full Name'] == customer_name, 'Customer ID'].iloc[0]
+            age = df_historico.loc[df_historico['Customer Full Name'] == customer_name, 'Age'].iloc[0]
+            st.text_input(label='Edad', value=age, disabled=True)
+            gender = df_historico.loc[df_historico['Customer Full Name'] == customer_name, 'Gender'].iloc[0]
+            st.text_input(label='Genero', value=gender, disabled=True)
+            location = df_historico.loc[df_historico['Customer Full Name'] == customer_name, 'Location'].iloc[0]
+            st.text_input(label='Ciudad', value=location, disabled=True)
+            email = df_historico.loc[df_historico['Customer Full Name'] == customer_name, 'Customer Email'].iloc[0]
+            st.text_input(label='Email', value=email, disabled=True)
+            previous_purchases = int(df_historico.loc[df_historico['Customer Full Name'] == customer_name, 'Previous Purchases'].iloc[0])
+            previous_purchases += 1
+
         else:
             customer_name = st.text_input(label='Nombre completo', placeholder='Nombre Cliente')
             customer_id = generate_new_customer_id(df_historico, id_column="Customer ID")
+            age = campo_numerico('Age', 'Edad')
+            gender = campo_categorico(df_historico, 'Gender', 'Genero')
+            location = campo_categorico(df_historico, 'Location', 'Ciudad')
+            email = st.text_input(label='Email', placeholder='client@example.com')
+            previous_purchases = 1
 
-        age = campo_numerico('Age', 'Edad')
-        gender = campo_categorico(df_historico, 'Gender', 'Genero')
-        location = campo_categorico(df_historico, 'Location', 'Ciudad')
-
+        
     with col2:
         st.subheader('🛒 Compra')
         purchase_date = st.date_input('Fecha de compra', value=datetime.today())
@@ -433,6 +447,9 @@ with tabs[0]:
         #se rellenan los campos que no se mostraron para que el registro quede completo en el dataset
         if campos_visibles != CAMPOS_OPERATIVOS:
             operativos.update(DEFAULTS_OFFLINE)
+            online_store = 'In-Store Purchase'
+        else:
+            online_store = operativos['Online Store']
 
         transaction_id = st.text_input(
             'Transaction ID', value=f'TXN-{np.random.randint(10000, 99999)}'
@@ -442,20 +459,34 @@ with tabs[0]:
         record = {
             'Transaction ID': transaction_id,
             'Customer ID': customer_id,
+            'Customer Full Name': customer_name,
+            'Customer Email': email,
             'Purchase Date': str(purchase_date),
             'Age': age,
             'Gender': gender,
             'Location': location,
             'Online/Offline': online_offline,
+            'Online Store': online_store,
             'Category': category,
             'Item Purchased': item_purchased,
             'Brand': brand,
-            'session': temporada,
+            'Color': operativos['Color'],
+            'Size': operativos['Size'],
+            'Quantity': operativos['Quantity'],
+            'Purchase Amount (₹)': operativos['Purchase Amount (₹)'],
+            'Discount (%)': operativos['Discount (%)'],
+            'Festival/Sale': operativos['Festival/Sale'],
+            'Shipping Charge (₹)': operativos['Shipping Charge (₹)'],
+            'Delivery Speed': operativos['Delivery Speed'],
+            'Delivery Time (Days)': operativos['Delivery Time (Days)'],
+            'Subscription Status': operativos['Subscription Status'],
+            'Payment Method': operativos['Payment Method'],
+            'Review Rating': operativos['Review Rating'],
+            'Return Status': operativos['Return Status'],
+            'Previous Purchases': previous_purchases,
         }
-        record.update(operativos)
 
         single_df = pd.DataFrame([record])
-        single_df['Purchase Date'] = pd.to_datetime(single_df['Purchase Date'])
 
         log_event(
             logger,
@@ -500,7 +531,7 @@ with tabs[0]:
         st.markdown('---')
         st.subheader('🔮 Recomendaciones')
 
-        recomendacion, aviso = obtener_recomendacion(item_purchased)
+        recomendacion, aviso = obtener_recomendacion_item(item_purchased)
 
         if recomendacion:
             st.success('Items similares a **' + item_purchased + '**: ' + ', '.join(recomendacion))
@@ -508,7 +539,7 @@ with tabs[0]:
                       item=item_purchased, fuente='item_based')
         else:
             st.warning(aviso)
-            log_event(logger, 'Recomendacion no disponible', level=30,
+            log_event(logger, 'Recomendacion no disponible para este usuario.', level=30,
                       item=item_purchased, motivo=aviso)
 
 
@@ -629,10 +660,11 @@ with tabs[2]:
     if df_historico is None:
         st.warning('Sin dataset cargado no se puede construir la ficha.')
     else:
-        clientes = sorted(df_historico['Customer ID'].dropna().unique().tolist())
+        clientes = sorted(df_historico['Customer Full Name'].dropna().unique().tolist())
         cliente = st.selectbox('Cliente', options=clientes, key='cliente_360')
+        cliente_id = df_historico.loc[df_historico['Customer Full Name'] == cliente, 'Customer ID'].iloc[0]
 
-        datos = metricas_cliente(df_historico, cliente)
+        datos = metricas_cliente(df_historico, cliente_id)
 
         if not datos:
             st.warning('Sin historial para este cliente.')
@@ -645,14 +677,14 @@ with tabs[2]:
             f3.metric('Ordenes', datos['compras'])
             f4.metric('Categoria preferida', datos['categoria'])
             f5.metric(
-                'Riesgo de churn',
-                datos['churn'],
+                'Actividad',
+                datos['actividad'],
                 delta=f'{datos["dias_inactivo"]} dias sin comprar',
-                delta_color='inverse' if datos['churn'] == 'Alto' else 'normal',
+                delta_color='inverse' if datos['actividad'] == 'Bajo' else 'normal',
             )
 
-            t_hist, t_cross, t_camp, t_notas = st.tabs(
-                ['Historial', 'Cross-selling', 'Campanias', 'Notas CRM']
+            t_hist, t_camp, t_notas = st.tabs(
+                ['Historial', 'Campañas', 'Notas CRM']
             )
 
             with t_hist:
@@ -663,36 +695,6 @@ with tabs[2]:
                     ]],
                     width='stretch',
                 )
-
-            with t_cross:
-                st.caption('Sugerencia para el vendedor en el punto de venta.')
-
-                comprados = set(datos['historial']['Item Purchased'])
-                misma_cat = df_historico[df_historico['Category'] == datos['categoria']]
-                candidatos = (
-                    misma_cat[~misma_cat['Item Purchased'].isin(comprados)]
-                    ['Item Purchased'].value_counts().head(5)
-                )
-
-                if candidatos.empty:
-                    st.info('El cliente ya compro todo el catalogo de su categoria.')
-                else:
-                    for item, veces in candidatos.items():
-                        st.write(f'- Ofrecer **{item}** ({veces} compras de clientes similares)')
-
-                st.divider()
-                st.caption('Salida del recomendador item-based:')
-
-                ultimo_item = datos['historial'].iloc[0]['Item Purchased']
-                recomendacion, aviso = obtener_recomendacion(ultimo_item)
-
-                if recomendacion:
-                    st.write(
-                        f'Items similares a **{ultimo_item}**: '
-                        + ', '.join(recomendacion)
-                    )
-                else:
-                    st.write(aviso)
 
             with t_camp:
                 st.caption('Arma el mensaje a enviar.')
