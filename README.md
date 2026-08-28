@@ -1,1050 +1,717 @@
-# ReActiva Recommender
+# Reactiva — Customer Reactivation Recommendation System
 
-Proyecto Final de Data Science desarrollado por **GMJ Analytics**.
+## Overview
 
-## Objetivo
+Reactiva is a recommendation system designed to identify customers who may have become inactive and recommend products they are likely to purchase when they return.
 
-Desarrollar un sistema inteligente que permita:
+The system uses historical customer purchase behavior to identify inactive customers and generate personalized product recommendations.
 
-- Estimar la probabilidad de recompra de un cliente dentro de 180 días.
-- Identificar clientes con riesgo de no volver a comprar.
-- Generar un ranking Top 5 de productos recomendados.
-- Incorporar contexto estacional y geográfico.
-- Convertir los resultados en acciones comerciales concretas.
+The primary recommendation pipeline uses a **Gradient Boosting classifier** to predict the product category that an inactive customer is most likely to purchase. The system then recommends the most popular products within that predicted category.
 
-## Equipo
+The project also evaluates alternative recommendation approaches using a shared time-based backtesting framework.
 
-- Jesús Elías
-- Martín Darío Fernández
-- Gabriel Gómez
+---
 
-## Flujo de trabajo y protección de main
+# Recommendation Pipeline
 
-La rama `main` se encuentra protegida y no se permiten modificaciones directas sobre ella.
-
-El desarrollo del proyecto se realiza mediante un flujo de trabajo basado en Issues, ramas y Pull Requests:
-
-1. Las tareas se seleccionan desde las Issues habilitadas en GitHub Project.
-2. Cada integrante se asigna la Issue que va a desarrollar.
-3. Antes de comenzar una nueva tarea se actualiza la rama `main` local.
-4. Cada Issue se desarrolla en una rama independiente creada a partir de `main`.
-5. Los cambios se registran mediante commits y se publican en la rama correspondiente.
-6. La integración a `main` se realiza exclusivamente mediante Pull Request.
-7. La rama `main` se encuentra configurada para impedir el merge de un Pull Request hasta contar con al menos una aprobación de revisión por parte de otro integrante del equipo. Esta regla aplica también cuando el autor del PR es quien posee permisos para realizar el merge.
-8. Una vez aprobado y mergeado el PR, la Issue asociada se considera finalizada.
-
-Este flujo permite mantener la trazabilidad de las tareas, los aportes individuales y las revisiones realizadas por el equipo durante el desarrollo del proyecto.
-
-## Estado
-
-Proyecto en etapa inicial de configuración y preparación del repositorio.
-
-pyproject.toml > archivo para la instalación del module reactivate |
-
-                                                         |_ una vez se decarguen los archivos en local ejecutar en la terminar pip install e . esto permitira importar load_data.py desde cualquier lugar del proyecto debido a que reactiva estará instaldo en el env
-
-### Estado actual del desarrollo
-
-Desde la creación de esta descripción inicial, el proyecto avanzó sobre la estructura base y actualmente cuenta con componentes funcionales de preparación de datos, análisis exploratorio, ingeniería de features, modelado, recomendación, validación, aplicación interactiva, almacenamiento en AWS S3, logging estructurado, pruebas automáticas y ejecución mediante Docker.
-
-El archivo `pyproject.toml` continúa siendo utilizado para definir el paquete `reactiva` bajo la estructura `src/`.
-
-La instalación editable utilizada actualmente puede realizarse desde la raíz del repositorio mediante:
-
-```bash
-python -m pip install -e .
-```
-
-Esto permite importar los módulos del paquete `reactiva` desde distintos componentes del proyecto sin depender de rutas manuales.
-
-Por ejemplo:
-
-```python
-from reactiva.data.load_data import load_data
-```
-
-La lógica reutilizable del proyecto se encuentra centralizada principalmente en:
+The production recommendation process follows this structure:
 
 ```text
-src/reactiva/
+Historical Customer Purchases
+            │
+            ▼
+Build Customer Features
+            │
+            ▼
+Identify Active and Inactive Customers
+            │
+            ▼
+Train Gradient Boosting Model
+            │
+            ▼
+Predict Most Likely Product Category
+            │
+            ▼
+Select Popular Recent Items
+Within the Predicted Category
+            │
+            ▼
+Top-K Product Recommendations
 ```
 
-evitando, cuando es posible, mantener implementaciones duplicadas entre notebooks, Streamlit y los módulos productivos.
-
-### Arquitectura actual del repositorio
-
-La estructura principal del proyecto es actualmente:
+The recommendation process can be summarized as:
 
 ```text
-ReActiva-recommender/
-│
-├── .github/
-│
-├── api/
-│
-├── app/
-│   ├── app.py
-│   └── Dockerfile
-│
-├── artifacts/
-│
-├── dashboard/
-│
-├── data/
-│
-├── docs/
-│   ├── context_features.md
-│   ├── data_dictionary.csv
-│   └── troubleshooting/
-│       └── README.md
-│
-├── notebooks/
-│   ├── 01_eda_reactiva.ipynb
-│   └── 02_recommender_feasibility.ipynb
-│
-├── reports/
-│
-├── src/
-│   └── reactiva/
-│       ├── config.py
-│       │
-│       ├── data/
-│       │   ├── audit_data.py
-│       │   ├── load_data.py
-│       │   ├── save_results.py
-│       │   └── validate_data.py
-│       │
-│       ├── features/
-│       │   ├── build_features.py
-│       │   └── context.py
-│       │
-│       ├── modeling/
-│       │   ├── backtest.py
-│       │   ├── evaluate.py
-│       │   ├── model_comparasion_270day_metrics_updated_threshold_070.ipynb
-│       │   ├── optuna_gb_classification.ipynb
-│       │   ├── predict_matriz.py
-│       │   └── train.py
-│       │
-│       ├── monitoring/
-│       │
-│       ├── pipeline/
-│       │   └── run_pipeline.py
-│       │
-│       ├── recommender/
-│       │   └── recommender.py
-│       │
-│       └── utils/
-│
-├── tests/
-│
-├── .dockerignore
-├── .gitignore
-├── pyproject.toml
-├── requirements.txt
-└── README.md
+Customer History
+      ↓
+Customer Features
+      ↓
+Gradient Boosting
+      ↓
+Predicted Category
+      ↓
+Popular Items in Category
+      ↓
+Recommendations
 ```
 
-Algunas carpetas y archivos forman parte de la arquitectura objetivo del proyecto y todavía no contienen su implementación definitiva.
+---
 
-En particular, las áreas de API, Power BI, backtesting productivo y otros componentes del pipeline continúan desarrollándose mediante las Issues correspondientes.
+# Inactive Customer Identification
 
-### Flujo técnico actual
+Customers are considered potential inactive customers when:
 
-El flujo general implementado puede representarse de la siguiente manera:
+1. They have historical purchase activity.
+2. They have not made a purchase during the configured inactivity period.
+
+The system divides the available data into two periods:
 
 ```text
-Dataset histórico
+Historical Window
         │
-        ▼
-Amazon S3
+        ├── Used to build customer features
         │
-        ▼
-Carga de datos
+        └── Used to identify customers with historical activity
+
+Recent Window
         │
-        ▼
-Auditoría
+        ├── Used to identify currently active customers
         │
-        ▼
-Validación y preparación
+        ├── Used to create category labels
         │
-        ▼
-Ingeniería de features
-        │
-        ├──────────────► EDA
-        │
-        ├──────────────► Análisis de factibilidad
-        │
-        ▼
-Modelado y recomendación
-        │
-        ├── User-Based Collaborative Filtering
-        ├── Frequency-weighted User-Based
-        ├── Content-Based
-        ├── Popularity
-        ├── Item-Based Collaborative Filtering
-        ├── Classification
-        └── Hybrid
-        │
-        ▼
-Contexto y mecanismos de fallback
-        │
-        ▼
-Streamlit
-        │
-        ▼
-Interacción comercial / CRM
-        │
-        ▼
-Resultados, S3 y logging
+        └── Used to determine currently popular products
 ```
 
-### Fuente de datos
+Customers who appear in the historical window but do not appear in the recent window are considered inactive candidates.
 
-La fuente principal de información del proyecto se encuentra almacenada en Amazon S3.
+---
 
-La ruta del dataset se obtiene mediante configuración externa a través de:
+# Gradient Boosting Recommender
+
+The main recommendation model uses a `GradientBoostingClassifier`.
+
+The model is trained using active customers.
+
+For each active customer:
 
 ```text
-DATASET_URI
-```
-
-y no se encuentra hardcodeada directamente dentro del código.
-
-La configuración general se centraliza en:
-
-```text
-src/reactiva/config.py
-```
-
-Actualmente se utilizan variables de entorno como:
-
-```text
-DATASET_URI
-S3_BUCKET
-MATRIX_URI
-AWS_REGION
-API_KEY
-USUARIO_ADMIN
-PASSWORD_ADMIN
-```
-
-Las credenciales, contraseñas, API keys, tokens y secretos no deben almacenarse directamente en el código ni versionarse en GitHub.
-
-El archivo privado:
-
-```text
-.env
-```
-
-debe mantenerse fuera del repositorio.
-
-### Auditoría del dataset
-
-El proyecto cuenta con una auditoría automatizada implementada en:
-
-```text
-src/reactiva/data/audit_data.py
-```
-
-Esta auditoría permite analizar, entre otros aspectos:
-
-- dimensiones del dataset;
-- nombres de columnas;
-- tipos de datos;
-- valores nulos;
-- duplicados;
-- cardinalidad;
-- rangos numéricos;
-- fechas;
-- valores extremos;
-- concentración de categorías;
-- concentración de productos;
-- consistencia entre registros online y offline;
-- estructura de compras por cliente.
-
-El objetivo de esta etapa es cuantificar la calidad de los datos antes de aplicar transformaciones o utilizarlos en componentes posteriores del proyecto.
-
-Los valores extremos detectados no se eliminan automáticamente únicamente por tratarse de outliers estadísticos, ya que un valor extremo no necesariamente representa un dato incorrecto.
-
-### Validación y preparación reproducible
-
-La lógica de validación y preparación se encuentra principalmente en:
-
-```text
-src/reactiva/data/validate_data.py
-```
-
-Actualmente se contemplan controles relacionados con:
-
-- esquema esperado;
-- presencia de columnas;
-- tipos de datos;
-- normalización de valores;
-- fechas;
-- rangos numéricos;
-- valores faltantes;
-- categorías;
-- consistencia entre variables;
-- reglas particulares para compras online y offline;
-- detección y tratamiento de duplicados.
-
-La estrategia de deduplicación fue ajustada para incorporar:
-
-```text
-Transaction ID
-```
-
-como parte de la identificación de una operación.
-
-Esto evita considerar erróneamente como duplicadas compras legítimas realizadas por un mismo cliente sobre un mismo producto y fecha.
-
-La preparación actual conserva las 10.000 transacciones válidas del dataset.
-
-### Análisis exploratorio de datos
-
-El EDA reproducible se encuentra en:
-
-```text
-notebooks/01_eda_reactiva.ipynb
-```
-
-El notebook analiza distintas dimensiones del comportamiento de compra, incluyendo:
-
-- clientes;
-- transacciones;
-- fechas;
-- evolución temporal;
-- canal online/offline;
-- ubicación;
-- categorías;
-- productos;
-- marcas;
-- talles;
-- edad;
-- género;
-- importes de compra;
-- cantidades;
-- descuentos;
-- devoluciones;
-- suscripciones;
-- métodos de pago;
-- cargos de envío;
-- tiempos de entrega.
-
-También incluye análisis de relaciones entre variables.
-
-Para variables numéricas se utiliza, cuando corresponde:
-
-```text
-Correlación de Spearman
-```
-
-y para relaciones entre variables categóricas:
-
-```text
-Cramér's V
-```
-
-Las variables relacionadas exclusivamente con operaciones online son analizadas teniendo en cuenta que determinados valores presentes en compras offline representan condiciones estructurales y no necesariamente valores faltantes.
-
-Entre los resultados observados existe concentración a nivel de categoría, aunque no se observa un único producto que domine ampliamente el dataset.
-
-El producto individual más frecuente representa aproximadamente el 8,7 % de las compras y los cinco productos más frecuentes concentran aproximadamente el 40,7 %.
-
-Los resultados del EDA se mantienen como evidencia descriptiva y no se interpretan automáticamente como relaciones causales.
-
-### Análisis de factibilidad del recomendador
-
-El análisis de factibilidad se encuentra documentado en:
-
-```text
-notebooks/02_recommender_feasibility.ipynb
-```
-
-Este notebook estudia las características del dataset que afectan directamente la posibilidad de construir un sistema de recomendación.
-
-Entre los análisis realizados se encuentran:
-
-- matriz cliente-producto;
-- sparsity;
-- profundidad del historial por cliente;
-- cold start;
-- clientes inactivos;
-- popularidad;
-- cobertura de catálogo;
-- long tail;
-- coocurrencia;
-- soporte entre productos;
-- afinidades item-item;
-- estabilidad temporal;
-- crecimiento de información al incorporar nuevas transacciones;
-- soporte disponible por ubicación y temporada.
-
-La matriz cliente-producto presenta actualmente una sparsity aproximada de:
-
-```text
-88,26 %
-```
-
-Esto indica que existe información suficiente para construir mecanismos de personalización, aunque una parte de los clientes posee historiales relativamente cortos.
-
-Por esta razón el sistema contempla mecanismos de fallback para escenarios donde la información individual disponible no sea suficiente.
-
-El catálogo actual utilizado en estos análisis contiene 24 productos.
-
-### Construcción centralizada de features
-
-Las features derivadas utilizadas por diferentes componentes del proyecto se centralizan en:
-
-```text
-src/reactiva/features/build_features.py
-```
-
-Esto permite evitar que notebooks, modelos, Streamlit y recomendadores mantengan distintas implementaciones de una misma regla.
-
-Entre las features actualmente centralizadas se encuentran:
-
-```text
-season
-age_group
-```
-
-#### season
-
-La variable:
-
-```text
-season
-```
-
-se deriva de:
-
-```text
-Purchase Date
-```
-
-Los valores estandarizados son:
-
-- `winter`;
-- `summer`;
-- `monsoon`;
-- `post-monsoon`.
-
-#### age_group
-
-La variable:
-
-```text
-age_group
-```
-
-se deriva de `Age`.
-
-Las reglas vigentes son:
-
-- `Young Adult`: edad menor o igual a 25 años;
-- `Adult`: edad mayor a 25 y menor a 65 años;
-- `Old`: edad mayor o igual a 65 años.
-
-La documentación técnica detallada se encuentra en:
-
-[`docs/context_features.md`](docs/context_features.md)
-
-### Uso de Location
-
-La variable:
-
-```text
-Location
-```
-
-se utiliza exclusivamente como contexto geográfico.
-
-No debe interpretarse como:
-
-- sucursal;
-- tienda física;
-- clima real;
-- condición meteorológica.
-
-Su utilización permite estudiar y aprovechar diferencias observadas entre las ubicaciones existentes dentro del dataset.
-
-### Modelado y comparación de recomendadores
-
-La comparación principal de modelos se encuentra en:
-
-```text
-src/reactiva/modeling/model_comparasion_270day_metrics_updated_threshold_070.ipynb
-```
-
-El notebook evalúa los distintos modelos utilizando una misma separación temporal para asegurar una comparación consistente.
-
-La evaluación actual utiliza:
-
-```text
-Fecha máxima: 2024-12-30
-Fecha de corte: 2024-04-04
-```
-
-La partición resultante contiene:
-
-- 6.281 filas de entrenamiento;
-- 3.719 filas de holdout;
-- 1.877 clientes presentes tanto en entrenamiento como en holdout y, por lo tanto, disponibles para evaluación.
-
-El período final de 270 días se utiliza como holdout para evaluación.
-
-Actualmente se comparan los siguientes enfoques:
-
-1. User-Based Collaborative Filtering.
-2. Frequency-weighted User-Based.
-3. Content-Based.
-4. Popularity.
-5. Item-Based Collaborative Filtering.
-6. Classification.
-7. Hybrid User-Based CF + Popularity Fallback.
-
-Los resultados principales registrados para Top 5 son:
-
-| Modelo | Precision@5 | Recall@5 | Hit Rate@5 |
-|---|---:|---:|---:|
-| User-Based | 0.0938 | 0.2725 | 0.3841 |
-| Frequency-weighted User-Based | 0.0893 | 0.2230 | 0.3239 |
-| Content-Based | 0.0884 | 0.2254 | 0.3277 |
-| Popularity | 0.1290 | 0.4079 | 0.5440 |
-| Item-Based CF | 0.1139 | 0.3565 | 0.4928 |
-| Classification | 0.1078 | 0.3418 | 0.4681 |
-| Hybrid | 0.0952 | 0.2896 | 0.4033 |
-
-La evaluación no se limita únicamente a Precision, Recall y Hit Rate.
-
-También se incorporan métricas como:
-
-- NDCG;
-- MAP;
-- Long-tail Precision;
-- Long-tail Recall;
-- Long-tail Hit Rate;
-- Long-tail Share;
-- Long-tail Catalog Coverage;
-- Average Score;
-- Sparsity.
-
-Esto permite evaluar los modelos desde diferentes perspectivas y no únicamente por la cantidad de coincidencias entre productos recomendados y compras futuras.
-
-### Optimización mediante Optuna
-
-El proyecto incorpora optimización de hiperparámetros mediante:
-
-```text
-Optuna
-```
-
-en el notebook:
-
-```text
-src/reactiva/modeling/optuna_gb_classification.ipynb
-```
-
-Actualmente se optimiza el:
-
-```text
-GradientBoostingClassifier
-```
-
-utilizado dentro del enfoque de clasificación.
-
-La optimización mantiene:
-
-- la misma ventana temporal;
-- los mismos clientes evaluables;
-- las mismas métricas principales utilizadas en la comparación de modelos.
-
-La ejecución registrada utiliza 100 trials.
-
-El mejor trial obtenido registró aproximadamente:
-
-```text
-Precision@5: 0.1135
-Recall@5:    0.3512
-HitRate@5:   0.4823
-```
-
-Los hiperparámetros encontrados pueden posteriormente compararse contra el modelo base utilizando el mismo marco de evaluación.
-
-### Recomendador canónico
-
-La implementación reutilizable del recomendador se encuentra centralizada en:
-
-```text
-src/reactiva/recommender/recommender.py
-```
-
-Esta implementación funciona como fuente canónica para evitar mantener diferentes copias de la lógica de recomendación.
-
-Actualmente se conserva la lógica de:
-
-```text
-User-Based Collaborative Filtering
-```
-
-basada en similitud entre clientes.
-
-También se dispone de recomendación mediante similitud de productos a través de:
-
-```python
-get_recommendations_items()
-```
-
-utilizada actualmente por Streamlit.
-
-La matriz de similitud de productos se carga cuando es requerida y puede mantenerse en memoria durante la ejecución, evitando realizar una carga automática innecesaria al importar el módulo.
-
-### Contexto y fallback
-
-La lógica contextual se encuentra en:
-
-```text
-src/reactiva/features/context.py
-```
-
-Actualmente pueden generarse rankings en cuatro niveles:
-
-1. popularidad global;
-2. popularidad por `season`;
-3. popularidad por `Location`;
-4. popularidad por interacción `season + Location`.
-
-Para evitar utilizar segmentos contextuales construidos con muy pocas observaciones se define un soporte mínimo configurable.
-
-El valor por defecto actual es:
-
-```text
-DEFAULT_MIN_SUPPORT = 20
-```
-
-Cuando un segmento no alcanza ese soporte, el sistema continúa hacia un nivel menos específico.
-
-La secuencia implementada es:
-
-```text
-season + Location
+Historical Customer Behavior
         ↓
-Location
+Customer Features
         ↓
-season
+Gradient Boosting
         ↓
-Global
+Most Frequent Category
+During the Recent Window
 ```
 
-El fallback puede completar progresivamente el Top K utilizando más de un nivel.
+The predicted category is then used to generate product recommendations.
 
-Los productos incorporados no se repiten.
-
-La función contextual devuelve además información de trazabilidad que permite identificar:
-
-- nivel evaluado;
-- soporte disponible;
-- si el nivel fue utilizado;
-- motivo por el cual se utilizó o descartó;
-- productos incorporados desde ese nivel.
-
-Esta trazabilidad permite posteriormente explicar de qué forma se construyó una recomendación.
-
-### Cobertura funcional del recomendador
-
-Durante las validaciones realizadas sobre el criterio vigente de 270 días se identificaron:
+For an inactive customer:
 
 ```text
-1.028 clientes inactivos
+Historical Behavior
+        ↓
+Customer Features
+        ↓
+Gradient Boosting
+        ↓
+Predicted Product Category
+        ↓
+Top-K Popular Recent Items
+Within That Category
 ```
 
-y el flujo de recomendación consiguió obtener recomendaciones para todos ellos:
+This allows the system to generate recommendations that are personalized at the category level.
+
+---
+
+# Customer Features
+
+Customer features are built from historical purchase behavior.
+
+The feature representation may include:
+
+* Purchase frequency by category
+* Total purchases
+* Recency of the customer's last purchase
+* Other historical behavioral signals
+
+The objective is to represent each customer using only information available before the recommendation period.
+
+This prevents future purchase information from being used during training.
+
+---
+
+# Popularity-Based Recommendation
+
+A global popularity model is used as a baseline.
+
+The popularity model recommends the same Top-K most frequently purchased items to all evaluated customers.
 
 ```text
-0 clientes sin recomendación
+Historical / Recent Purchase Data
+            ↓
+Calculate Item Popularity
+            ↓
+Rank Items by Frequency
+            ↓
+Top-K Most Popular Items
+            ↓
+Same Recommendations for All Customers
 ```
 
-Este resultado representa una validación de cobertura funcional.
+The popularity model is important because it provides a strong baseline against which personalized recommendation models can be compared.
 
-No debe interpretarse como efectividad comercial real ni como garantía de que cada recomendación vaya a producir una compra.
+A more complex model is only useful if it provides sufficient additional value compared with this baseline.
 
-### Streamlit
+---
 
-La aplicación interactiva del proyecto se encuentra en:
+# GBoost + Popularity Blend
+
+An experimental hybrid recommendation approach combines:
+
+* Personalized category-based recommendations from Gradient Boosting.
+* Globally popular products.
+
+For example:
 
 ```text
-app/app.py
+GBoost Recommendations:
+[A, B, C]
+
+Global Popularity:
+[D, E]
+
+Final Recommendation List:
+[A, B, C, D, E]
 ```
 
-y está desarrollada utilizando:
+Duplicate items are removed.
+
+If duplicates reduce the number of recommendations below `K`, additional globally popular items are used to fill the recommendation list.
+
+This experiment allows the system to evaluate the trade-off between:
 
 ```text
-Streamlit
+Personalization
+        +
+Popularity Accuracy
+        +
+Catalog Diversity
 ```
 
-La aplicación funciona como interfaz de interacción con diferentes componentes de ReActiva.
-
-Actualmente contiene áreas para:
-
-1. Indexación individual.
-2. Carga masiva.
-3. Explorador 360 y CRM.
-4. Auditoría y logs para usuarios con acceso administrativo.
-
-#### Indexación individual
-
-La aplicación permite trabajar tanto con:
-
-- clientes existentes;
-- perfiles nuevos sin historial.
-
-Se solicitan datos relacionados con:
-
-- perfil;
-- edad;
-- género;
-- ubicación;
-- compra;
-- categoría;
-- marca;
-- producto;
-- canal de venta;
-- variables operativas.
-
-Para clientes sin historial, donde un recomendador colaborativo no dispone todavía de información individual suficiente, se utiliza una estrategia inicial de cold start basada en características contextuales disponibles.
-
-#### Carga masiva
-
-Streamlit permite trabajar con conjuntos de transacciones y aplicar controles de validación antes de continuar con el flujo.
-
-Los datos pueden posteriormente almacenarse en S3 cuando la configuración y permisos disponibles lo permiten.
-
-#### Explorador 360 y CRM
-
-La aplicación dispone de una vista orientada al análisis individual de clientes.
-
-Entre las métricas actualmente calculadas se encuentran:
-
-- cantidad de compras;
-- gasto total;
-- ticket promedio;
-- categoría más frecuente;
-- marca más frecuente;
-- ubicación;
-- última compra;
-- días de inactividad;
-- historial de compras;
-- nivel asociado al criterio de inactividad.
-
-### Logging estructurado
-
-El sistema de logging se encuentra implementado en:
+Different blending ratios can be evaluated, such as:
 
 ```text
-src/reactiva/utils/logger.py
+4 GBoost + 1 Popularity
+3 GBoost + 2 Popularity
+2 GBoost + 3 Popularity
+1 GBoost + 4 Popularity
+0 GBoost + 5 Popularity
 ```
 
-Los registros se generan en formato JSON.
+---
 
-Actualmente pueden escribirse:
+# Evaluation Framework
 
-- en consola;
-- en archivos persistentes dentro de `artifacts/logs`.
+All recommendation models are evaluated using the same **time-based backtesting framework**.
 
-El logger permite registrar:
-
-- eventos;
-- errores;
-- excepciones;
-- información estructurada adicional.
-
-También incorpora sanitización automática de variables cuyos nombres puedan indicar contenido sensible.
-
-Entre las palabras detectadas se encuentran:
+The data is divided into three conceptual periods:
 
 ```text
-password
-secret
-token
-api_key
-access_key
-credential
+Training Window
+      ↓
+Recent Window
+      ↓
+Future Holdout Window
 ```
 
-Cuando se detectan estos campos, su valor se reemplaza en los logs por:
+### Training Window
+
+The training window contains historical customer behavior.
+
+It is used to:
+
+* Build customer features.
+* Train recommendation models.
+* Build customer-item relationships.
+* Define the long-tail catalog.
+
+### Recent Window
+
+The recent window is used to:
+
+* Identify active customers.
+* Identify potentially inactive customers.
+* Create target labels for the Gradient Boosting model.
+* Identify currently popular products.
+
+### Future Holdout Window
+
+The future window is not used to train the models.
+
+It contains the future purchases of customers who were previously identified as inactive.
+
+These purchases are used as the ground truth.
+
+The common evaluation question is:
+
+> Can information available before an inactive customer returns help predict which items that customer will purchase later?
+
+---
+
+# Shared Model Evaluation
+
+All models are evaluated at the same level:
 
 ```text
-[REDACTED]
+Customer
+    │
+    ▼
+Top-K Recommended Items
+    │
+    ▼
+Compare With
+Actual Future Purchases
 ```
 
-Esto reduce el riesgo de que credenciales o secretos aparezcan accidentalmente en registros del sistema.
+This ensures that different recommendation approaches are evaluated under the same framework.
 
-### AWS S3
-
-Amazon S3 forma parte de la arquitectura actual de ReActiva.
-
-Se utiliza como fuente o destino para distintos elementos del proyecto, entre ellos:
-
-- dataset histórico;
-- resultados procesados;
-- archivos generados;
-- artefactos utilizados por componentes del recomendador.
-
-La comunicación con AWS se realiza utilizando configuración y credenciales externas al código.
-
-Las credenciales nunca deben incorporarse dentro de archivos versionados en GitHub.
-
-### Dependencias
-
-El archivo canónico de dependencias del proyecto es:
+The models can differ internally, but their final output is evaluated in the same way:
 
 ```text
-requirements.txt
+Recommended Items
+        vs
+Actual Future Purchases
 ```
 
-ubicado en la raíz del repositorio.
+---
 
-Se eliminaron listas de dependencias duplicadas para evitar diferencias entre componentes del proyecto.
+# Ranking Metrics
 
-Entre las principales tecnologías presentes actualmente se encuentran:
+## Precision@K
 
-- Python;
-- pandas;
-- NumPy;
-- scikit-learn;
-- SciPy;
-- Streamlit;
-- boto3;
-- botocore;
-- s3fs;
-- matplotlib;
-- seaborn;
-- Optuna;
-- pytest;
-- python-dotenv;
-- Uvicorn.
-
-`Uvicorn` permanece como dependencia disponible para una futura implementación de API, pero actualmente no se utiliza para ejecutar `app.py`, ya que la aplicación existente está desarrollada con Streamlit.
-
-### Instalación del entorno
-
-Se recomienda trabajar dentro de un entorno virtual.
-
-Desde la raíz del repositorio:
-
-```bash
-python -m venv .venv
-```
-
-En Windows:
-
-```bash
-.venv\Scripts\activate
-```
-
-Luego se instalan las dependencias mediante:
-
-```bash
-python -m pip install -r requirements.txt
-```
-
-y el paquete local:
-
-```bash
-python -m pip install -e .
-```
-
-### Ejecución de Streamlit
-
-Con el entorno configurado y las variables necesarias disponibles:
-
-```bash
-streamlit run app/app.py
-```
-
-### Docker
-
-El proyecto cuenta actualmente con una configuración funcional de Docker.
-
-El archivo correspondiente se encuentra en:
+Precision measures how many recommended items were actually purchased.
 
 ```text
-app/Dockerfile
+Precision@K =
+Relevant Recommended Items
+──────────────────────────
+Total Recommended Items
 ```
 
-La imagen utiliza como base:
+A high Precision@K means that a larger proportion of the recommendations were relevant.
+
+---
+
+## Recall@K
+
+Recall measures how many of the customer's actual future purchases were recovered by the recommendation list.
 
 ```text
-python:3.11-slim
+Recall@K =
+Relevant Recommended Items
+────────────────────────
+Actual Purchased Items
 ```
 
-e instala las dependencias desde el `requirements.txt` ubicado en la raíz.
-
-La imagen puede construirse desde la raíz del repositorio mediante:
-
-```bash
-docker build -f app/Dockerfile -t reactiva-local .
-```
-
-La aplicación dentro del contenedor se inicia mediante:
+For example:
 
 ```text
-streamlit run app.py --server.address=0.0.0.0 --server.port=8501
+Recommended:
+[A, B, C, D, E]
+
+Actually Purchased:
+[B, D, F]
 ```
 
-El puerto expuesto es:
+The model successfully recovered:
 
 ```text
-8501
+[B, D]
 ```
 
-Una ejecución local utilizando variables de entorno externas puede realizarse, por ejemplo, mediante:
-
-```bash
-docker run --rm -p 8501:8501 --env-file .env reactiva-local
-```
-
-La aplicación queda disponible localmente en:
+Therefore:
 
 ```text
-http://localhost:8501
+Recall@5 = 2 / 3
 ```
 
-Las variables privadas y credenciales deben proporcionarse al contenedor de forma externa y nunca incorporarse dentro de la imagen Docker.
+Recall is particularly important when evaluating whether the recommender can recover items the customer actually buys.
 
-### Validaciones y pruebas
+---
 
-El proyecto cuenta con pruebas automáticas dentro de:
+## Hit Rate@K
+
+Hit Rate measures whether the recommendation list contains at least one item that the customer actually purchased.
 
 ```text
-tests/
+Hit Rate@K =
+
+1 → At least one recommendation was purchased.
+
+0 → None of the recommendations were purchased.
 ```
 
-Actualmente se validan componentes relacionados con:
+The final Hit Rate is the average across evaluated customers.
 
-- preparación de datos;
-- deduplicación;
-- features;
-- temporadas;
-- grupos etarios;
-- rankings contextuales;
-- soporte mínimo;
-- fallback;
-- ausencia de productos repetidos.
+---
 
-Después de la integración más reciente de features contextuales, recomendador y Docker, la suite completa registró:
+## NDCG
+
+Normalized Discounted Cumulative Gain evaluates the ranking quality of the recommendations.
+
+Relevant items that appear higher in the recommendation list receive greater value.
+
+For example:
 
 ```text
-19 passed
+Position 1 → Higher importance
+Position 2 → Slightly lower importance
+Position 3 → Lower importance
 ```
 
-También fueron validados:
+Therefore, NDCG measures not only whether relevant items were recommended, but also whether they were ranked near the top of the list.
 
-- imports del recomendador sin ejecuciones automáticas;
-- ejecución de notebooks desde un kernel limpio;
-- consistencia de las features centralizadas;
-- mantenimiento de la partición temporal;
-- mantenimiento de las métricas de comparación;
-- análisis de factibilidad después de la centralización de features;
-- `python -m pip check`;
-- dependencias de AWS;
-- Optuna;
-- construcción de la imagen Docker;
-- ejecución del contenedor;
-- funcionamiento de Streamlit sobre el puerto 8501.
+---
 
-### Componentes pendientes
+## MAP
 
-El repositorio también contiene componentes correspondientes a etapas que todavía deben continuar desarrollándose.
+Mean Average Precision evaluates the precision of the recommendation list at the positions where relevant items appear.
 
-Entre los principales puntos pendientes se encuentran:
+MAP rewards models that place relevant recommendations earlier in the ranking.
 
-- backtesting histórico reproducible;
-- consolidación de tablas de resultados;
-- modelo de datos para Power BI;
-- dashboard de Power BI;
-- métricas y KPIs comerciales;
-- integración de outputs procesados con BI;
-- evolución del ranking comercial;
-- separación de recomendaciones de afinidad y oportunidades comerciales;
-- trazabilidad comercial adicional;
-- futura capa de API;
-- integración final de los componentes dentro del pipeline completo.
+Together with NDCG, MAP provides additional information about recommendation ranking quality.
 
-La presencia de carpetas o archivos preparados para estas funciones no implica que dichas funcionalidades estén finalizadas.
+---
 
-Su implementación definitiva debe realizarse mediante las Issues correspondientes y el flujo de revisión establecido por el equipo.
+# Long-Tail Evaluation
 
-## Actualización del dataset
+Overall Recall can favor models that repeatedly recommend popular products.
 
-El dataset actual incorpora los campos `Customer Full Name` y `Customer Email` para que el flujo de reactivación pueda identificar al cliente de forma legible y disponer de un medio de contacto.
+To evaluate whether the models can also recover less frequently purchased products, the system includes long-tail metrics.
 
-Estos dos campos fueron incorporados de forma sintética con fines operativos del proyecto:
+The long-tail catalog is defined using the training data.
 
-- `Customer Full Name`: permite identificar al cliente más allá de su `Customer ID`.
-- `Customer Email`: permite representar el canal de contacto necesario para una acción de reactivación.
+Items are ranked according to purchase frequency, and the popular head of the catalog is defined using an **80% cumulative purchase-share cutoff**.
 
-El dataset vigente contiene:
-
-- **10.000 filas**;
-- **27 columnas**;
-- **3.291 clientes únicos**.
-
-El esquema actual ya no incluye:
+Items outside that popular head are considered long-tail items.
 
 ```text
-Frequency of Purchases
+Item Popularity Distribution
+
+Highly Popular Items
+        │
+        ▼
+80% Cumulative Purchase Share
+        │
+        ├── Popular Head
+        │
+        └── Long-Tail Items
 ```
 
-Esta modificación fue incorporada también a los procesos de auditoría, validación, preparación, documentación y análisis que consumen el dataset.
+---
 
-El diccionario de datos actualizado se encuentra disponible en:
+## Long-Tail Precision
 
-[`docs/data_dictionary.csv`](docs/data_dictionary.csv)
+Measures the proportion of recommended items that are both:
 
-Los campos `Customer Full Name` y `Customer Email` deben considerarse variables operativas incorporadas para hacer posible la representación del flujo de contacto con clientes y no variables originales obtenidas del dataset fuente.
+* Relevant.
+* Long-tail items.
 
-## Criterio actual de inactividad
+A high value indicates that the recommender successfully recommends less-popular items that customers actually purchase.
 
-El criterio vigente del proyecto para considerar a un cliente inactivo es de **270 días**. Este valor reemplaza el criterio anterior de 180 días mencionado en documentación previa.
+---
 
-El criterio anterior se mantiene visible dentro de la documentación histórica y del objetivo original del proyecto para conservar la trazabilidad de la evolución de la solución.
+## Long-Tail Recall
 
-La evaluación actual de los modelos utiliza además una separación temporal de 270 días, donde las compras del período final se reservan como holdout y la información anterior al corte se utiliza para construir las recomendaciones que luego son evaluadas.
+Measures the model's ability to recover long-tail items that customers actually purchased.
 
-De esta manera se evita utilizar información futura del período de evaluación durante la construcción de las recomendaciones.
+```text
+Long-Tail Recall =
+Relevant Long-Tail Recommendations
+─────────────────────────────────
+Actual Long-Tail Purchases
+```
 
-El criterio debe diferenciarse de una garantía comercial: considerar un cliente inactivo según este corte constituye una regla operativa del proyecto y no implica afirmar que el cliente haya abandonado definitivamente la empresa.
+---
 
-## Solución de problemas
+## Long-Tail Hit Rate
 
-Los problemas técnicos confirmados durante el desarrollo, junto con su causa, solución, resultado y medidas de prevención, se documentan en:
+Measures whether the recommender successfully recommends at least one relevant long-tail item to a customer who purchases long-tail products.
 
-[`docs/troubleshooting/README.md`](docs/troubleshooting/README.md)
+---
 
-Este documento se utiliza para registrar incidencias técnicas reales detectadas durante el desarrollo y evitar que los mismos problemas vuelvan a repetirse.
+## Long-Tail Share
 
-Cada incidencia documentada debe incluir, cuando corresponda:
+Measures the proportion of recommendation slots occupied by long-tail items.
 
-- contexto;
-- problema detectado;
-- causa;
-- solución aplicada;
-- resultado;
-- medidas de prevención.
+For example:
 
-Entre los problemas ya identificados durante el desarrollo se encuentran situaciones relacionadas con:
+```text
+Recommended Items:
 
-- reutilización incorrecta de ramas de trabajo;
-- actualización y compatibilidad del dataset almacenado en S3;
-- deduplicación incorrecta de transacciones legítimas;
-- codificación del archivo `requirements.txt`;
-- compatibilidad de dependencias de AWS;
-- duplicación de archivos de dependencias;
-- duplicación de implementaciones del recomendador;
-- diferencias entre el runtime de Streamlit y una futura API;
-- centralización del código utilizado por Docker y Streamlit.
+[A, B, C, D, E]
 
-La documentación de troubleshooting complementa al README principal: el README describe el estado y funcionamiento general del proyecto, mientras que `docs/troubleshooting/README.md` conserva el historial técnico de problemas confirmados y sus soluciones.
+Long-Tail Items:
+
+[C]
+```
+
+Then:
+
+```text
+Long-Tail Share = 1 / 5 = 20%
+```
+
+This metric measures how much exposure the recommender gives to less-popular products.
+
+---
+
+## Long-Tail Catalog Coverage
+
+Measures the proportion of the available long-tail catalog that appears at least once in the recommendations.
+
+For example:
+
+```text
+Available Long-Tail Items:
+[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+
+Long-Tail Items Recommended:
+[1, 3, 5]
+
+Long-Tail Catalog Coverage:
+
+3 / 10 = 30%
+```
+
+A higher catalog coverage indicates that the model recommends a broader range of long-tail products.
+
+---
+
+# Average Score
+
+The Average Score provides an aggregate summary of predictive and ranking performance.
+
+It is calculated as the mean of:
+
+* Precision
+* Recall
+* Hit Rate
+* Long-Tail Precision
+* Long-Tail Recall
+* Long-Tail Hit Rate
+* NDCG
+* MAP
+
+The following metrics are excluded from the Average Score:
+
+* Long-Tail Share
+* Long-Tail Catalog Coverage
+* Sparsity
+
+These metrics are treated separately because they describe recommendation distribution and characteristics of the system rather than direct predictive accuracy.
+
+---
+
+# Sparsity
+
+Sparsity measures how many possible user-item interactions are empty.
+
+A highly sparse interaction matrix means that customers have interacted with only a small proportion of the available catalog.
+
+```text
+User × Item Matrix
+
+        Item A  Item B  Item C  Item D
+
+User 1     1       0       0       1
+
+User 2     0       1       0       0
+
+User 3     0       0       1       0
+```
+
+Most cells are empty, which indicates a sparse recommendation problem.
+
+Sparsity is reported as a diagnostic characteristic of the dataset and recommendation environment.
+
+---
+
+# Learning Curve Experiments
+
+Learning curves are used to evaluate how model performance changes as more historical training data becomes available.
+
+The experiment uses progressively larger portions of the training history:
+
+```text
+20%
+40%
+60%
+80%
+100%
+```
+
+The future evaluation data remains fixed.
+
+The only experimental variable is the amount of historical training data available to the model.
+
+```text
+20% Historical Data
+        ↓
+Train Models
+        ↓
+Evaluate on Same Future Holdout
+
+40% Historical Data
+        ↓
+Train Models
+        ↓
+Evaluate on Same Future Holdout
+
+...
+
+100% Historical Data
+        ↓
+Train Models
+        ↓
+Evaluate on Same Future Holdout
+```
+
+Learning curves can be evaluated using:
+
+* Recall@5
+* Long-Tail Recall@5
+
+These experiments help determine whether additional historical data improves the ability of each model to recover future purchases and long-tail purchases.
+
+---
+
+# Models Evaluated
+
+The project evaluates the following recommendation approaches:
+
+### Gradient Boosting
+
+```text
+Customer History
+        ↓
+Customer Features
+        ↓
+Gradient Boosting
+        ↓
+Predicted Category
+        ↓
+Popular Items Within Category
+```
+
+### Content-Based Recommendation
+
+Uses customer or product characteristics to generate recommendations based on similarity.
+
+### User-Based Collaborative Filtering
+
+Uses similarities between customers to identify products purchased by similar users.
+
+### Popularity Baseline
+
+Recommends the globally most popular items.
+
+### GBoost + Popularity Blend
+
+Combines category-based recommendations from GBoost with globally popular items.
+
+---
+
+# Model Selection
+
+Model selection is based on the business objective rather than a single metric.
+
+If the primary objective is:
+
+```text
+Maximize Future Purchase Recovery
+```
+
+then Recall, Hit Rate, NDCG, and MAP are particularly important.
+
+If the objective includes:
+
+```text
+Personalization
+        +
+Product Discovery
+        +
+Long-Tail Exposure
+```
+
+then Long-Tail Recall, Long-Tail Share, and Long-Tail Catalog Coverage become important considerations.
+
+A simple popularity model may outperform more complex personalized models on overall purchase recovery.
+
+However, a popularity model can recommend the same products to every customer and may provide little or no long-tail exposure.
+
+The final recommendation strategy should therefore balance:
+
+```text
+Predictive Accuracy
+        +
+Personalization
+        +
+Ranking Quality
+        +
+Long-Tail Recovery
+        +
+Catalog Coverage
+```
+
+---
+
+# Production Workflow
+
+The production workflow is:
+
+```text
+Transaction Data
+      ↓
+Load Dataset
+      ↓
+Identify Historical and Recent Windows
+      ↓
+Identify Inactive Customers
+      ↓
+Build Customer Features
+      ↓
+Train Gradient Boosting Classifier
+      ↓
+Predict Customer Categories
+      ↓
+Generate Top-K Recommendations
+      ↓
+Store Predictions
+      ↓
+Application Interface
+```
+
+Predictions can be persisted for later use so that the recommendation interface does not need to retrain the model for every user request.
+
+---
+
+# Project Goal
+
+The objective of Reactiva is to explore whether historical customer behavior can be used to generate relevant recommendations for customers who become inactive and later return.
+
+The project compares multiple recommendation strategies using the same time-based future holdout framework.
+
+The final evaluation considers not only whether recommended products match future purchases, but also:
+
+* Ranking quality.
+* Personalization.
+* Long-tail performance.
+* Product discovery.
+* Catalog coverage.
+* Data sparsity.
+
+This provides a broader evaluation of recommendation quality than relying on a single metric.
