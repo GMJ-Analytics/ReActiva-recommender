@@ -8,6 +8,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app/app.py ./app.py
 COPY src/reactiva ./reactiva
+COPY .streamlit ./.streamlit
 
 EXPOSE 8501
 

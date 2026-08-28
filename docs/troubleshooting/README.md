@@ -494,3 +494,446 @@ Al importar CSV generados por Python en Power BI:
 - evitar depender únicamente de la detección automática de tipos;
 - validar manualmente métricas decimales después de la importación;
 - utilizar conversión de tipo con configuración regional explícita cuando el archivo utilice punto decimal.
+
+---
+
+---
+
+## 2026-08-28 - Incompatibilidad entre el nuevo modelo de reactivación y Streamlit
+
+### Contexto
+
+Después de integrar a `main` la nueva implementación del recomendador basada en Gradient Boosting para clientes inactivos, se actualizó la rama de Streamlit con los cambios más recientes del repositorio.
+
+La aplicación Streamlit utiliza además recomendaciones comerciales para clientes existentes que realizan compras en el punto de venta.
+
+### Problema
+
+La nueva versión de:
+
+```text
+src/reactiva/recommender/recommender.py
+```
+
+había eliminado las funciones:
+
+```python
+build_customer_profile()
+build_customer_similarity()
+```
+
+mientras que:
+
+```text
+app/app.py
+```
+
+continuaba importando y utilizando `build_customer_similarity()` para generar recomendaciones comerciales de clientes existentes.
+
+Esto producía una incompatibilidad entre el nuevo recomendador de reactivación y la aplicación Streamlit.
+
+### Causa
+
+Las funciones de similitud cliente-cliente habían formado parte anteriormente del recomendador utilizado para clientes inactivos.
+
+Al reemplazarse esa lógica de reactivación por Gradient Boosting, dejaron de ser necesarias dentro de ese flujo y fueron eliminadas.
+
+Sin embargo, Streamlit seguía utilizando la similitud cliente-cliente para una responsabilidad diferente: generar recomendaciones de venta asistida para clientes con historial que se encuentran comprando en una tienda física.
+
+Por lo tanto, la eliminación era válida para el flujo de reactivación, pero no para todos los consumidores del módulo.
+
+### Solución aplicada
+
+Se mantuvo sin modificaciones la implementación de Gradient Boosting utilizada para clientes inactivos y se reincorporaron únicamente:
+
+```python
+build_customer_profile()
+build_customer_similarity()
+```
+
+junto con:
+
+```python
+from sklearn.metrics.pairwise import cosine_similarity
+```
+
+De esta manera quedaron diferenciadas las responsabilidades:
+
+```text
+Cliente inactivo >= 270 días
+→ Gradient Boosting
+→ recomendación de reactivación
+```
+
+y:
+
+```text
+Cliente existente en tienda
+→ similitud cliente-cliente
+→ recomendaciones de afinidad y oportunidad
+```
+
+Para clientes nuevos sin historial se mantiene el mecanismo:
+
+```text
+Item-to-Item
+```
+
+basado en el producto que se encuentra comprando.
+
+### Resultado
+
+Streamlit volvió a importar correctamente el recomendador canónico.
+
+Se validó funcionalmente:
+
+- cliente existente;
+- generación de Top 3 de alta afinidad;
+- generación de recomendaciones de oportunidad;
+- cliente nuevo mediante `PENDING-UUID`;
+- recomendación Item-to-Item;
+- persistencia de las transacciones individuales en S3.
+
+La incorporación de las funciones de similitud no modifica ni reemplaza el modelo Gradient Boosting de reactivación.
+
+### Prevención
+
+Antes de eliminar una función reutilizable de:
+
+```text
+src/reactiva/
+```
+
+debe verificarse si existen consumidores externos dentro del repositorio.
+
+Una función que deje de utilizarse dentro de un modelo particular no necesariamente constituye código muerto si continúa siendo utilizada por Streamlit, notebooks, pipelines u otros componentes.
+
+Los cambios de modelado deben revisarse considerando las responsabilidades de todos los consumidores del módulo canónico.
+
+---
+
+## 2026-08-28 - Cache indefinido del dataset histórico en Streamlit
+
+### Contexto
+
+Streamlit utiliza el dataset histórico canónico configurado mediante:
+
+```text
+DATASET_URI
+```
+
+para mostrar información de clientes y construir recomendaciones.
+
+La carga del dataset estaba implementada mediante:
+
+```python
+@st.cache_data(show_spinner='Leyendo dataset historico...')
+```
+
+### Problema
+
+El cache no tenía definido un tiempo de expiración.
+
+Esto permitía que una instancia de Streamlit mantuviera en memoria una versión antigua del dataset aun después de que el dataset canónico hubiera sido actualizado en S3.
+
+### Causa
+
+`st.cache_data` conserva el resultado de la función mientras Streamlit considere válida la entrada cacheada.
+
+Al no existir un `ttl`, la aplicación no tenía una política explícita para volver a consultar periódicamente la fuente configurada.
+
+### Solución aplicada
+
+Se incorporó un tiempo de vida de una hora:
+
+```python
+@st.cache_data(
+    ttl=3600,
+    show_spinner='Leyendo dataset historico...'
+)
+```
+
+De esta manera Streamlit puede reutilizar el dataset en memoria durante la operación normal y volver a consultar la fuente canónica una vez vencido el cache.
+
+### Resultado
+
+La aplicación evita realizar una lectura del dataset histórico en cada interacción y, al mismo tiempo, deja de mantener indefinidamente una copia potencialmente desactualizada.
+
+La versión actual adopta deliberadamente una política de consistencia diaria:
+
+```text
+ventas del día
+→ staging
+→ consolidación nocturna
+→ dataset canónico actualizado
+→ recomendaciones posteriores
+```
+
+Las transacciones todavía presentes en staging no necesitan afectar las recomendaciones generadas durante el mismo día.
+
+La actualización en tiempo real o casi real puede incorporarse posteriormente como una mejora de escalabilidad si el caso de negocio lo requiere.
+
+### Prevención
+
+Toda fuente remota utilizada mediante cache debe definir explícitamente:
+
+- cuándo puede considerarse válida la información cacheada;
+- cuándo debe releerse la fuente;
+- qué nivel de consistencia necesita el caso de negocio.
+
+No debe eliminarse el cache únicamente para obtener información más reciente si el sistema no requiere consistencia en tiempo real, ya que eso puede aumentar innecesariamente las lecturas contra servicios externos.
+
+---
+
+## 2026-08-28 - Separación de staging para ventas individuales y cargas masivas
+
+### Contexto
+
+Streamlit permite registrar transacciones de dos formas diferentes:
+
+- ventas individuales realizadas desde el flujo de atención;
+- cargas masivas utilizadas para representar ventas provenientes del canal online.
+
+Ambos flujos deben persistir información en Amazon S3 antes de que las transacciones sean incorporadas al dataset histórico canónico.
+
+### Problema
+
+La aplicación disponía de dos caminos de escritura hacia S3, pero no existía una separación suficientemente explícita entre los archivos generados por ventas individuales y los archivos correspondientes a cargas masivas.
+
+Utilizar una ubicación genérica dificultaría posteriormente:
+
+- identificar el origen de cada archivo;
+- aplicar reglas específicas durante la consolidación;
+- auditar cada tipo de ingreso;
+- evitar confundir una carga batch con una venta registrada individualmente.
+
+### Causa
+
+Los dos mecanismos de ingreso fueron desarrollados inicialmente como funcionalidades independientes.
+
+La arquitectura de consolidación todavía no se encontraba definida completamente y el helper de subida mantenía un prefijo genérico como valor por defecto.
+
+### Solución aplicada
+
+Se definieron dos rutas independientes dentro de staging:
+
+```text
+staging/individual/
+```
+
+para las transacciones registradas individualmente desde Streamlit, y:
+
+```text
+staging/batch/
+```
+
+para las cargas masivas.
+
+El flujo queda:
+
+```text
+venta individual
+→ validación
+→ objeto independiente
+→ staging/individual/
+```
+
+y:
+
+```text
+archivo masivo
+→ validación
+→ limpieza
+→ staging/batch/
+```
+
+Cada subida utiliza además una key única basada en fecha, hora y un identificador aleatorio, evitando que dos operaciones concurrentes intenten sobrescribir el mismo objeto.
+
+### Resultado
+
+Se validaron funcionalmente ambos caminos contra Amazon S3.
+
+Las ventas individuales fueron almacenadas correctamente bajo:
+
+```text
+staging/individual/
+```
+
+y una carga de prueba de tres transacciones fue almacenada correctamente bajo:
+
+```text
+staging/batch/
+```
+
+Los archivos generados exclusivamente para la prueba fueron eliminados posteriormente para evitar que una futura consolidación los procese como ventas reales.
+
+La separación deja preparado el origen de datos para que el proceso nocturno pueda consumir ambos tipos de staging de forma controlada.
+
+### Prevención
+
+Las distintas fuentes operativas no deben escribir indiscriminadamente sobre una misma ubicación genérica cuando posteriormente requieren trazabilidad o tratamiento diferente.
+
+Toda nueva fuente de ingesta debe definir explícitamente:
+
+- origen;
+- prefijo de staging;
+- formato esperado;
+- estrategia de identificación única;
+- reglas de validación;
+- mecanismo de consolidación.
+
+El dataset canónico no debe modificarse directamente desde interfaces concurrentes como Streamlit mientras exista una capa de staging destinada a controlar esa integración.
+
+---
+
+## 2026-08-28 - Validación preventiva de carga masiva y robustez del visor de logs
+
+### Contexto
+
+Durante la revisión funcional de Streamlit se analizaron dos puntos defensivos:
+
+- la carga de archivos CSV masivos;
+- la visualización administrativa de logs estructurados.
+
+Ambos componentes podían funcionar correctamente en condiciones normales, pero necesitaban controles adicionales para evitar fallas frente a entradas inesperadas.
+
+### Problema
+
+En la carga masiva, el archivo podía llegar a ser procesado por Pandas sin una validación previa de tamaño.
+
+Esto implicaba que un archivo excesivamente grande pudiera consumir memoria innecesariamente antes de ejecutar las validaciones de contenido.
+
+En el visor de auditoría, el filtro por nivel asumía que todos los registros contenían una columna:
+
+```text
+level
+```
+
+con valores válidos.
+
+Un archivo histórico, externo o parcialmente malformado podía no incluir ese campo o contener valores nulos, generando errores al construir el filtro.
+
+### Causa
+
+Las validaciones existentes estaban orientadas principalmente a la calidad interna del dataset una vez cargado.
+
+El tamaño del archivo todavía no se verificaba antes de su lectura.
+
+Por otra parte, los logs generados actualmente incluyen normalmente el campo `level`, pero el visor administrativo no contemplaba defensivamente registros históricos o externos con esquemas incompletos.
+
+### Solución aplicada
+
+Para la carga masiva se definió un límite operativo de:
+
+```text
+20 MB
+```
+
+El límite se aplica en dos niveles.
+
+A nivel del framework Streamlit se configuró:
+
+```text
+.streamlit/config.toml
+```
+
+con:
+
+```toml
+[server]
+maxUploadSize = 20
+```
+La configuración también se copia dentro de la imagen Docker mediante:
+
+```dockerfile
+COPY .streamlit ./.streamlit
+```
+
+Esto evita que la ejecución dentro del contenedor vuelva al límite por defecto de Streamlit y mantiene el mismo comportamiento entre desarrollo local y Docker.
+
+De esta manera Streamlit impide seleccionar archivos superiores al límite configurado.
+
+Además, la aplicación mantiene una validación defensiva propia mediante:
+
+```python
+MAX_UPLOAD_SIZE_MB = 20
+MAX_UPLOAD_SIZE_BYTES = MAX_UPLOAD_SIZE_MB * 1024 * 1024
+```
+
+Antes de procesar el CSV se verifica:
+
+```text
+archivo vacío
+→ rechazar
+```
+
+y:
+
+```text
+archivo > 20 MB
+→ rechazar
+```
+
+Solamente después de superar estas validaciones se ejecutan:
+
+```text
+lectura
+→ DataValidator
+→ limpieza
+→ subida a S3
+```
+
+Para el visor de logs se incorporó una normalización defensiva del campo `level`.
+
+Si la columna no existe se crea con:
+
+```text
+UNKNOWN
+```
+
+y si contiene valores nulos se reemplazan también por:
+
+```text
+UNKNOWN
+```
+
+antes de construir las opciones del filtro.
+
+### Resultado
+
+La carga masiva quedó protegida frente a archivos vacíos o superiores al límite operativo definido por la aplicación.
+
+Se validó además un archivo real de prueba con:
+
+```text
+3 filas
+27 columnas
+```
+
+que completó correctamente:
+
+```text
+validación
+→ limpieza
+→ subida a staging/batch/
+```
+
+El visor de auditoría continuó funcionando correctamente y quedó preparado para tolerar registros donde `level` no exista o tenga valores faltantes.
+
+### Prevención
+
+Las validaciones de archivos deben diferenciar dos niveles:
+
+```text
+validación del contenedor
+→ tamaño, existencia y posibilidad de lectura
+
+validación del contenido
+→ esquema, tipos, nulos, duplicados, rangos y reglas de negocio
+```
+
+No debe asumirse que una validación de contenido protege automáticamente contra archivos excesivamente grandes.
+
+De la misma manera, las herramientas de auditoría deben tolerar registros históricos o externos parcialmente incompletos siempre que puedan representarse de forma segura.
+
+Los valores faltantes de campos descriptivos deben manejarse defensivamente cuando su ausencia no impida interpretar el resto del evento.

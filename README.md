@@ -4,13 +4,17 @@ Proyecto Final de Data Science desarrollado por **GMJ Analytics**.
 
 ## Objetivo
 
-Desarrollar un sistema inteligente que permita:
+Desarrollar un sistema inteligente de recomendación y reactivación comercial que permita:
 
-- Estimar la probabilidad de recompra de un cliente dentro de 180 días.
-- Identificar clientes con riesgo de no volver a comprar.
-- Generar un ranking Top 5 de productos recomendados.
-- Incorporar contexto estacional y geográfico.
+- Identificar clientes que alcanzan el criterio operativo de inactividad definido por el proyecto.
+- Generar recomendaciones de productos orientadas a la reactivación de clientes inactivos.
+- Generar recomendaciones comerciales para clientes que realizan compras en tiendas físicas.
+- Resolver escenarios de cold start para clientes nuevos mediante similitud entre productos.
+- Incorporar contexto estacional y geográfico cuando corresponda.
 - Convertir los resultados en acciones comerciales concretas.
+- Mantener una arquitectura preparada para integrar ventas provenientes de canales offline y online.
+
+El planteo inicial del proyecto contemplaba estimar la probabilidad de recompra dentro de 180 días. A medida que evolucionó la solución, el alcance fue redefinido hacia un sistema de recomendación y reactivación basado actualmente en un criterio operativo de **270 días de inactividad**.
 
 ## Equipo
 
@@ -37,17 +41,13 @@ Este flujo permite mantener la trazabilidad de las tareas, los aportes individua
 
 ## Estado
 
-Proyecto en etapa inicial de configuración y preparación del repositorio.
+El proyecto se encuentra en una etapa avanzada de desarrollo e integración funcional.
 
-pyproject.toml > archivo para la instalación del module reactivate |
-
-                                                         |_ una vez se decarguen los archivos en local ejecutar en la terminar pip install e . esto permitira importar load_data.py desde cualquier lugar del proyecto debido a que reactiva estará instaldo en el env
+Actualmente dispone de componentes funcionales de preparación de datos, análisis exploratorio, ingeniería de features, modelado, recomendación, validación, aplicación interactiva, almacenamiento en AWS S3, logging estructurado, pruebas automáticas, dashboard Power BI y ejecución mediante Docker.
 
 ### Estado actual del desarrollo
 
-Desde la creación de esta descripción inicial, el proyecto avanzó sobre la estructura base y actualmente cuenta con componentes funcionales de preparación de datos, análisis exploratorio, ingeniería de features, modelado, recomendación, validación, aplicación interactiva, almacenamiento en AWS S3, logging estructurado, pruebas automáticas y ejecución mediante Docker.
-
-El archivo `pyproject.toml` continúa siendo utilizado para definir el paquete `reactiva` bajo la estructura `src/`.
+El archivo `pyproject.toml` se utiliza para definir el paquete `reactiva` bajo la estructura `src/`.
 
 La instalación editable utilizada actualmente puede realizarse desde la raíz del repositorio mediante:
 
@@ -121,7 +121,7 @@ ReActiva-recommender/
 │       ├── modeling/
 │       │   ├── backtest.py
 │       │   ├── evaluate.py
-│       │   ├── model_comparasion_270day_metrics_updated_threshold_070.ipynb
+│       │   ├── models_comparison_final_metrics.ipynb
 │       │   ├── optuna_gb_classification.ipynb
 │       │   ├── predict_matriz.py
 │       │   └── train.py
@@ -147,57 +147,73 @@ ReActiva-recommender/
 
 Algunas carpetas y archivos forman parte de la arquitectura objetivo del proyecto y todavía no contienen su implementación definitiva.
 
-En particular, las áreas de API, Power BI, backtesting productivo y otros componentes del pipeline continúan desarrollándose mediante las Issues correspondientes.
+En particular, las áreas de API, automatización completa del pipeline, mensajería de campañas y otros componentes continúan desarrollándose mediante las Issues correspondientes.
 
 ### Flujo técnico actual
 
-El flujo general implementado puede representarse de la siguiente manera:
+El flujo general puede representarse actualmente de la siguiente manera:
 
 ```text
-Dataset histórico
-        │
-        ▼
-Amazon S3
-        │
-        ▼
-Carga de datos
-        │
-        ▼
-Auditoría
-        │
-        ▼
-Validación y preparación
-        │
-        ▼
-Ingeniería de features
-        │
-        ├──────────────► EDA
-        │
-        ├──────────────► Análisis de factibilidad
-        │
-        ▼
-Modelado y recomendación
-        │
-        ├── User-Based Collaborative Filtering
-        ├── Frequency-weighted User-Based
-        ├── Content-Based
-        ├── Popularity
-        ├── Item-Based Collaborative Filtering
-        ├── Classification
-        └── Hybrid
-        │
-        ▼
-Contexto y mecanismos de fallback
-        │
-        ▼
-Streamlit
-        │
-        ▼
-Interacción comercial / CRM
-        │
-        ▼
-Resultados, S3 y logging
+                    Dataset histórico canónico
+                              │
+                              ▼
+                         Amazon S3
+                              │
+                              ▼
+                    Carga y validación
+                              │
+                              ▼
+                 Ingeniería de features
+                              │
+              ┌───────────────┼───────────────┐
+              │               │               │
+              ▼               ▼               ▼
+             EDA        Modelado temporal   Streamlit
+                              │               │
+                              │               ├── Cliente existente
+                              │               │   → similitud cliente-cliente
+                              │               │
+                              │               ├── Cliente nuevo
+                              │               │   → Item-to-Item
+                              │               │
+                              │               └── registro de ventas
+                              │
+                              ▼
+                   Clientes inactivos
+                        >= 270 días
+                              │
+                              ▼
+                     Gradient Boosting
+                              │
+                              ▼
+               Recomendaciones de reactivación
 ```
+
+La ingesta operativa de nuevas transacciones se mantiene separada del dataset canónico:
+
+```text
+Ventas offline
+    │
+    ▼
+Streamlit
+    │
+    ▼
+staging/individual/
+```
+
+y:
+
+```text
+Ventas online
+    │
+    ▼
+Carga masiva simulada
+    │
+    ▼
+staging/batch/
+```
+
+La consolidación nocturna será responsable de integrar ambos orígenes al dataset histórico canónico.
 
 ### Fuente de datos
 
@@ -289,7 +305,7 @@ Actualmente se contemplan controles relacionados con:
 - reglas particulares para compras online y offline;
 - detección y tratamiento de duplicados.
 
-La estrategia de deduplicación fue ajustada para incorporar:
+La estrategia de deduplicación incorpora:
 
 ```text
 Transaction ID
@@ -410,6 +426,14 @@ season
 age_group
 ```
 
+La evolución del modelo de Gradient Boosting incorpora además features agregadas a nivel cliente mediante la función:
+
+```python
+build_customer_features()
+```
+
+Estas features resumen comportamiento histórico del cliente para ser utilizadas por el modelo de reactivación.
+
 #### season
 
 La variable:
@@ -472,16 +496,28 @@ Su utilización permite estudiar y aprovechar diferencias observadas entre las u
 
 ### Modelado y comparación de recomendadores
 
+Los modelos de recomendación se evalúan mediante un esquema temporal que evita utilizar información futura durante el entrenamiento o la construcción de recomendaciones.
 
-Los modelos de recomendación se evalúan mediante un esquema temporal común.
+La implementación más reciente se encuentra en:
 
-La evaluación utiliza una separación temporal de **270 días**, donde:
+```text
+src/reactiva/modeling/models_comparison_final_metrics.ipynb
+```
 
-* las compras anteriores al punto de corte se utilizan como información histórica para construir las recomendaciones;
-* el período reciente se utiliza dentro de la lógica de recomendación cuando corresponde;
-* las compras posteriores al corte se reservan como **holdout** para evaluar las recomendaciones.
+La evaluación utiliza una separación temporal asociada al criterio de **270 días**, diferenciando:
 
-De esta manera se evita utilizar información futura durante el entrenamiento o la generación de recomendaciones.
+```text
+df_train
+→ información histórica
+
+df_recent
+→ ventana reciente previa a la evaluación
+
+df_future
+→ ground truth / holdout futuro
+```
+
+Las compras futuras utilizadas como verdad de evaluación no participan en la construcción de las recomendaciones.
 
 La pregunta común de evaluación es:
 
@@ -495,14 +531,47 @@ Productos recomendados
 Compras reales futuras
 ```
 
-Los enfoques evaluados incluyen:
+Los enfoques actualmente evaluados incluyen:
 
-* Gradient Boosting;
-* Content-Based Recommendation;
-* User-Based Collaborative Filtering;
-* Popularity Baseline.
+- Gradient Boosting;
+- Content-Based Recommendation;
+- User-Based Collaborative Filtering;
+- Popularity Baseline.
 
-El enfoque Item-Item puede mantenerse como funcionalidad de recomendación basada en similitud de productos, pero no se incluye dentro de los experimentos de aprendizaje comparativos, ya que no realiza un proceso de aprendizaje incremental sobre los datos históricos.
+El enfoque Item-to-Item se mantiene como funcionalidad de recomendación basada en similitud de productos para determinados escenarios de Streamlit, pero no forma parte del conjunto principal de modelos comparados en el notebook final.
+
+### Gradient Boosting para reactivación
+
+El modelo actual orientado a clientes inactivos utiliza:
+
+```text
+GradientBoostingClassifier
+```
+
+El flujo general es:
+
+```text
+historial anterior
+        │
+        ▼
+build_customer_features()
+        │
+        ▼
+Gradient Boosting
+        │
+        ▼
+predicción de categoría
+        │
+        ▼
+productos recientes de esa categoría
+        │
+        ▼
+recomendación de reactivación
+```
+
+Los clientes candidatos a reactivación son aquellos que poseen historial anterior pero no registran compras dentro de la ventana reciente utilizada para aplicar el criterio de inactividad.
+
+El modelo de Gradient Boosting cumple una responsabilidad diferente de la recomendación utilizada en el punto de venta.
 
 ### Métricas de evaluación
 
@@ -510,15 +579,11 @@ La evaluación no se limita únicamente a Precision, Recall y Hit Rate.
 
 Se utilizan las siguientes métricas:
 
-* **Precision@K**: proporción de productos recomendados que fueron realmente comprados.
-
-* **Recall@K**: proporción de las compras reales futuras del cliente que fueron recuperadas por la lista de recomendaciones.
-
-* **Hit Rate@K**: indica si al menos uno de los productos recomendados fue comprado por el cliente.
-
-* **NDCG@K**: evalúa la calidad del ranking y otorga mayor importancia a los productos relevantes que aparecen en posiciones superiores.
-
-* **MAP@K**: evalúa la precisión en las posiciones donde aparecen productos relevantes dentro del ranking.
+- **Precision@K**: proporción de productos recomendados que fueron realmente comprados.
+- **Recall@K**: proporción de las compras reales futuras del cliente que fueron recuperadas por la lista de recomendaciones.
+- **Hit Rate@K**: indica si al menos uno de los productos recomendados fue comprado por el cliente.
+- **NDCG@K**: evalúa la calidad del ranking y otorga mayor importancia a los productos relevantes que aparecen en posiciones superiores.
+- **MAP@K**: evalúa la precisión en las posiciones donde aparecen productos relevantes dentro del ranking.
 
 ### Métricas Long-Tail
 
@@ -528,37 +593,31 @@ Los productos se ordenan según su frecuencia de compra y se utiliza un corte de
 
 Las métricas adicionales son:
 
-* **Long-tail Precision**: proporción de recomendaciones relevantes que pertenecen al long-tail.
-
-* **Long-tail Recall**: proporción de productos long-tail realmente comprados que fueron recuperados por las recomendaciones.
-
-* **Long-tail Hit Rate**: proporción de clientes para los cuales se recomendó al menos un producto long-tail relevante.
-
-* **Long-tail Share**: proporción de posiciones de recomendación ocupadas por productos long-tail.
-
-* **Long-tail Catalog Coverage**: proporción del catálogo long-tail disponible que aparece al menos una vez en las recomendaciones.
+- **Long-tail Precision**: proporción de recomendaciones relevantes que pertenecen al long-tail.
+- **Long-tail Recall**: proporción de productos long-tail realmente comprados que fueron recuperados por las recomendaciones.
+- **Long-tail Hit Rate**: proporción de clientes para los cuales se recomendó al menos un producto long-tail relevante.
+- **Long-tail Share**: proporción de posiciones de recomendación ocupadas por productos long-tail.
+- **Long-tail Catalog Coverage**: proporción del catálogo long-tail disponible que aparece al menos una vez en las recomendaciones.
 
 ### Average Score y Sparsity
 
 También se reportan:
 
-* **Average Score**: media aritmética de:
-
-  * Precision;
-  * Recall;
-  * Hit Rate;
-  * Long-tail Precision;
-  * Long-tail Recall;
-  * Long-tail Hit Rate;
-  * NDCG;
-  * MAP.
+- **Average Score**: media aritmética de:
+  - Precision;
+  - Recall;
+  - Hit Rate;
+  - Long-tail Precision;
+  - Long-tail Recall;
+  - Long-tail Hit Rate;
+  - NDCG;
+  - MAP.
 
 **Long-tail Share**, **Long-tail Catalog Coverage** y **Sparsity** no se incluyen dentro del Average Score, ya que se utilizan como métricas de distribución, cobertura y características del sistema.
 
-* **Sparsity**: mide la proporción de interacciones posibles cliente-producto que no contienen una compra.
+- **Sparsity**: mide la proporción de interacciones posibles cliente-producto que no contienen una compra.
 
 Esto permite evaluar los modelos desde diferentes perspectivas y no únicamente por la cantidad de coincidencias entre productos recomendados y compras futuras.
-
 
 ### Optimización mediante Optuna
 
@@ -610,21 +669,69 @@ src/reactiva/recommender/recommender.py
 
 Esta implementación funciona como fuente canónica para evitar mantener diferentes copias de la lógica de recomendación.
 
-Actualmente se conserva la lógica de:
+Actualmente conviven tres mecanismos con responsabilidades distintas.
+
+#### Reactivación de clientes inactivos
+
+Para clientes que cumplen el criterio de inactividad se utiliza:
 
 ```text
-User-Based Collaborative Filtering
+Gradient Boosting
 ```
 
-basada en similitud entre clientes.
+El modelo utiliza features históricas para predecir una categoría de interés y generar recomendaciones orientadas a reactivación.
 
-También se dispone de recomendación mediante similitud de productos a través de:
+#### Cliente existente en tienda física
+
+Para un cliente que ya posee historial y realiza una nueva compra presencial, Streamlit utiliza una matriz cliente-producto y similitud coseno entre clientes.
+
+Las funciones reutilizadas son:
+
+```python
+build_customer_profile()
+build_customer_similarity()
+```
+
+El flujo general es:
+
+```text
+historial cliente-producto
+        │
+        ▼
+similitud cliente-cliente
+        │
+        ▼
+clientes similares
+        │
+        ▼
+afinidad de productos
+        │
+        ├── Top 3 alta afinidad
+        │
+        └── hasta Top 3 oportunidad
+```
+
+Las recomendaciones de oportunidad utilizan productos con afinidad positiva, excluyen los productos ya seleccionados como Top de afinidad y priorizan menor rotación global, utilizando la afinidad como criterio secundario.
+
+Este mecanismo es independiente del Gradient Boosting utilizado para reactivación.
+
+#### Cliente nuevo sin historial
+
+Para un cliente nuevo no existe todavía historial suficiente para aplicar similitud cliente-cliente.
+
+En ese caso se utiliza recomendación:
+
+```text
+Item-to-Item
+```
+
+a partir del producto que el cliente está comprando.
+
+La función utilizada es:
 
 ```python
 get_recommendations_items()
 ```
-
-utilizada actualmente por Streamlit.
 
 La matriz de similitud de productos se carga cuando es requerida y puede mantenerse en memoria durante la ejecución, evitando realizar una carga automática innecesaria al importar el módulo.
 
@@ -679,25 +786,25 @@ La función contextual devuelve además información de trazabilidad que permite
 
 Esta trazabilidad permite posteriormente explicar de qué forma se construyó una recomendación.
 
-### Cobertura funcional del recomendador
+### Cobertura funcional
 
-Durante las validaciones realizadas sobre el criterio vigente de 270 días se identificaron:
+Durante etapas anteriores de validación del recomendador basado en User-Based Collaborative Filtering se identificaron:
 
 ```text
 1.028 clientes inactivos
 ```
 
-y el flujo de recomendación consiguió obtener recomendaciones para todos ellos:
+y el flujo de recomendación utilizado en esa instancia consiguió obtener recomendaciones para todos ellos:
 
 ```text
 0 clientes sin recomendación
 ```
 
-Este resultado representa una validación de cobertura funcional.
+Este resultado corresponde a una validación histórica de cobertura funcional del enfoque utilizado en esa etapa y no debe interpretarse como métrica del Gradient Boosting actualmente utilizado para reactivación.
 
-No debe interpretarse como efectividad comercial real ni como garantía de que cada recomendación vaya a producir una compra.
+Tampoco debe interpretarse como efectividad comercial real ni como garantía de que cada recomendación produzca una compra.
 
-### Streamlit
+## Streamlit
 
 La aplicación interactiva del proyecto se encuentra en:
 
@@ -720,9 +827,11 @@ Actualmente contiene áreas para:
 3. Explorador 360 y CRM.
 4. Auditoría y logs para usuarios con acceso administrativo.
 
-#### Indexación individual
+### Indexación individual
 
-La aplicación permite trabajar tanto con:
+La indexación individual representa principalmente el flujo de atención de una venta realizada desde una tienda física.
+
+La aplicación permite trabajar con:
 
 - clientes existentes;
 - perfiles nuevos sin historial.
@@ -740,15 +849,265 @@ Se solicitan datos relacionados con:
 - canal de venta;
 - variables operativas.
 
-Para clientes sin historial, donde un recomendador colaborativo no dispone todavía de información individual suficiente, se utiliza una estrategia inicial de cold start basada en características contextuales disponibles.
+Cada nueva transacción recibe inmediatamente un:
 
-#### Carga masiva
+```text
+Transaction ID
+```
 
-Streamlit permite trabajar con conjuntos de transacciones y aplicar controles de validación antes de continuar con el flujo.
+único basado en UUID.
 
-Los datos pueden posteriormente almacenarse en S3 cuando la configuración y permisos disponibles lo permiten.
+Esto permite diferenciar cada operación sin depender de un identificador secuencial compartido entre distintas sucursales o instancias de la aplicación.
 
-#### Explorador 360 y CRM
+### Identificación de clientes existentes
+
+Para un cliente existente, Streamlit permite seleccionar el nombre registrado y mostrar los datos conocidos del cliente.
+
+El correo electrónico actúa como dato adicional de confirmación.
+
+Si los datos corresponden al cliente identificado, se conserva su:
+
+```text
+Customer ID = CUSTXXXXXX
+```
+
+Si el cliente debe considerarse nuevo, se utiliza el flujo de perfil nuevo.
+
+### Clientes nuevos y PENDING-UUID
+
+Los clientes nuevos no reciben inmediatamente un `Customer ID` secuencial definitivo.
+
+Durante la operación se genera:
+
+```text
+PENDING-UUID
+```
+
+Esto evita que dos sucursales o instancias de Streamlit intenten generar simultáneamente el mismo siguiente identificador secuencial.
+
+La asignación definitiva del cliente queda reservada al proceso de consolidación.
+
+La regla objetivo de consolidación considera la normalización de:
+
+```text
+Customer Full Name
++
+Customer Email
+```
+
+para resolver identidades.
+
+El criterio previsto es:
+
+```text
+PENDING-UUID
+        │
+        ▼
+normalizar nombre + email
+        │
+        ▼
+¿nombre + email coinciden con cliente existente?
+        │
+       Sí
+        │
+        ▼
+reutilizar CUST existente
+```
+
+Si no existe coincidencia con un cliente registrado, se asignará un nuevo:
+
+```text
+CUSTXXXXXX
+```
+
+correlativo durante la consolidación.
+
+Si el email coincide pero el nombre no coincide, el registro no debe fusionarse automáticamente sin control, ya que podría representar un conflicto de identidad.
+
+El `Transaction ID` es independiente de este proceso y permanece único desde el momento en que se registra la venta.
+
+### Persistencia de ventas offline
+
+Las transacciones individuales se almacenan como objetos independientes dentro de:
+
+```text
+staging/individual/
+```
+
+Cada venta se guarda de forma independiente.
+
+Esto evita que dos sucursales o usuarios modifiquen simultáneamente un mismo archivo compartido.
+
+El flujo es:
+
+```text
+venta offline
+      │
+      ▼
+Streamlit
+      │
+      ▼
+validación
+      │
+      ▼
+Transaction ID único
+      │
+      ▼
+staging/individual/
+```
+
+### Carga masiva
+
+La carga masiva representa principalmente la ingesta simulada de ventas provenientes del canal online.
+
+El proyecto todavía no dispone de integración directa con un e-commerce real, por lo que este origen se representa mediante archivos CSV.
+
+El flujo actual permite:
+
+```text
+archivo CSV
+    │
+    ▼
+validación previa
+    │
+    ▼
+DataValidator
+    │
+    ▼
+limpieza
+    │
+    ▼
+staging/batch/
+```
+
+Las cargas masivas se almacenan en:
+
+```text
+staging/batch/
+```
+
+diferenciándolas de las ventas individuales realizadas desde tienda física.
+
+### Validación preventiva de archivos masivos
+
+Antes de que Pandas procese una carga masiva se valida que el archivo:
+
+- no esté vacío;
+- no supere el tamaño máximo operativo definido por la aplicación.
+
+El límite actualmente definido es:
+
+```text
+20 MB
+```
+l mismo límite se encuentra configurado a nivel de Streamlit mediante:
+
+```text
+.streamlit/config.toml
+
+[server]
+maxUploadSize = 20
+
+Después de esta validación previa se ejecutan los controles existentes de `DataValidator`, incluyendo controles de esquema, columnas, valores faltantes, tipos, duplicados, fechas, identificadores y otras reglas de calidad.
+
+La validación de tamaño no reemplaza al proceso de validación de datos; actúa como una protección previa antes de cargar archivos potencialmente demasiado grandes en memoria.
+
+### Staging y consistencia diaria
+
+Las nuevas ventas no se escriben directamente sobre el dataset histórico canónico.
+
+La arquitectura utiliza:
+
+```text
+staging/individual/
+staging/batch/
+```
+
+como capa de entrada.
+
+La versión actual adopta un modelo de consistencia diaria.
+
+Esto significa que las transacciones registradas durante el día:
+
+```text
+NO modifican inmediatamente las recomendaciones
+```
+
+generadas a partir del dataset canónico.
+
+El flujo previsto es:
+
+```text
+durante el día
+    │
+    ├── ventas offline → staging/individual/
+    │
+    └── ventas online  → staging/batch/
+    │
+    ▼
+consolidación nocturna
+    │
+    ▼
+dataset canónico actualizado
+    │
+    ▼
+recomendaciones del día siguiente
+```
+
+La incorporación de transacciones en tiempo real o casi real puede considerarse una mejora futura si el volumen o el caso de negocio lo requieren.
+
+### Consolidación nocturna
+
+La consolidación nocturna se encuentra definida como componente de integración entre staging y el dataset canónico.
+
+La lógica objetivo contempla:
+
+```text
+leer staging/
+→ validar archivos
+→ descartar o ignorar Transaction ID ya procesados
+→ consolidar transacciones
+→ resolver PENDING
+→ asignar CUSTXXXXXX cuando corresponda
+→ actualizar dataset canónico
+→ confirmar escritura exitosa
+→ mover o borrar staging procesado
+→ registrar logs y errores
+```
+
+La ejecución automática de esta consolidación forma parte de la arquitectura prevista y debe integrarse mediante la infraestructura correspondiente.
+
+Los archivos de staging solamente deben eliminarse o archivarse después de confirmar que la actualización del dataset canónico finalizó correctamente.
+
+### Dataset canónico y cache
+
+Streamlit utiliza el dataset histórico configurado mediante:
+
+```text
+DATASET_URI
+```
+
+como fuente canónica de información.
+
+La carga utiliza cache de Streamlit con tiempo de vida controlado:
+
+```python
+@st.cache_data(ttl=3600)
+```
+
+De esta forma se evita releer innecesariamente el dataset desde S3 en cada interacción de la interfaz.
+
+El cache tiene actualmente un TTL de:
+
+```text
+3600 segundos
+```
+
+equivalente a una hora.
+
+La existencia de este cache es coherente con la decisión de arquitectura actual de no incorporar al recomendador las transacciones del mismo día hasta que se ejecute la consolidación correspondiente.
+
+### Explorador 360 y CRM
 
 La aplicación dispone de una vista orientada al análisis individual de clientes.
 
@@ -765,7 +1124,29 @@ Entre las métricas actualmente calculadas se encuentran:
 - historial de compras;
 - nivel asociado al criterio de inactividad.
 
-### Logging estructurado
+### Auditoría y logs
+
+La cuarta pestaña está disponible para usuarios con rol administrativo.
+
+Permite visualizar archivos de log estructurados y filtrar registros por nivel.
+
+La lectura de logs contempla además registros donde:
+
+```text
+level
+```
+
+pueda estar ausente o contener un valor nulo.
+
+En esos casos se utiliza defensivamente:
+
+```text
+UNKNOWN
+```
+
+evitando que un registro histórico o externo con estructura incompleta interrumpa la visualización de la auditoría.
+
+## Logging estructurado
 
 El sistema de logging se encuentra implementado en:
 
@@ -808,13 +1189,15 @@ Cuando se detectan estos campos, su valor se reemplaza en los logs por:
 
 Esto reduce el riesgo de que credenciales o secretos aparezcan accidentalmente en registros del sistema.
 
-### AWS S3
+## AWS S3
 
 Amazon S3 forma parte de la arquitectura actual de ReActiva.
 
 Se utiliza como fuente o destino para distintos elementos del proyecto, entre ellos:
 
-- dataset histórico;
+- dataset histórico canónico;
+- staging de ventas individuales;
+- staging de cargas masivas;
 - resultados procesados;
 - archivos generados;
 - artefactos utilizados por componentes del recomendador.
@@ -823,7 +1206,25 @@ La comunicación con AWS se realiza utilizando configuración y credenciales ext
 
 Las credenciales nunca deben incorporarse dentro de archivos versionados en GitHub.
 
-### Dependencias
+### Estructura de staging
+
+Actualmente se diferencian dos entradas operativas:
+
+```text
+staging/
+│
+├── individual/
+│   └── transacciones registradas individualmente
+│
+└── batch/
+    └── cargas masivas
+```
+
+Cada archivo utiliza una key única basada en fecha, hora y un identificador aleatorio.
+
+Esto reduce el riesgo de colisiones entre procesos concurrentes.
+
+## Dependencias
 
 El archivo canónico de dependencias del proyecto es:
 
@@ -855,7 +1256,7 @@ Entre las principales tecnologías presentes actualmente se encuentran:
 
 `Uvicorn` permanece como dependencia disponible para una futura implementación de API, pero actualmente no se utiliza para ejecutar `app.py`, ya que la aplicación existente está desarrollada con Streamlit.
 
-### Instalación del entorno
+## Instalación del entorno
 
 Se recomienda trabajar dentro de un entorno virtual.
 
@@ -883,7 +1284,7 @@ y el paquete local:
 python -m pip install -e .
 ```
 
-### Ejecución de Streamlit
+## Ejecución de Streamlit
 
 Con el entorno configurado y las variables necesarias disponibles:
 
@@ -891,7 +1292,13 @@ Con el entorno configurado y las variables necesarias disponibles:
 streamlit run app/app.py
 ```
 
-### Docker
+La aplicación queda disponible normalmente en:
+
+```text
+http://localhost:8501
+```
+
+## Docker
 
 El proyecto cuenta actualmente con una configuración funcional de Docker.
 
@@ -908,6 +1315,24 @@ python:3.11-slim
 ```
 
 e instala las dependencias desde el `requirements.txt` ubicado en la raíz.
+
+La configuración compartida de Streamlit ubicada en:
+
+```text
+.streamlit/config.toml
+```
+
+también se copia dentro de la imagen Docker mediante:
+
+```dockerfile
+COPY .streamlit ./.streamlit
+```
+
+Esto mantiene dentro del contenedor el mismo límite de carga de archivos de **20 MB** utilizado durante la ejecución local.
+
+La imagen puede construirse desde la raíz del repositorio mediante:
+
+
 
 La imagen puede construirse desde la raíz del repositorio mediante:
 
@@ -941,7 +1366,7 @@ http://localhost:8501
 
 Las variables privadas y credenciales deben proporcionarse al contenedor de forma externa y nunca incorporarse dentro de la imagen Docker.
 
-### Validaciones y pruebas
+## Validaciones y pruebas
 
 El proyecto cuenta con pruebas automáticas dentro de:
 
@@ -961,12 +1386,6 @@ Actualmente se validan componentes relacionados con:
 - fallback;
 - ausencia de productos repetidos.
 
-Después de la integración más reciente de features contextuales, recomendador y Docker, la suite completa registró:
-
-```text
-19 passed
-```
-
 También fueron validados:
 
 - imports del recomendador sin ejecuciones automáticas;
@@ -982,22 +1401,76 @@ También fueron validados:
 - ejecución del contenedor;
 - funcionamiento de Streamlit sobre el puerto 8501.
 
-### Componentes pendientes
+### Validación funcional de Streamlit
+
+El flujo de Streamlit fue validado funcionalmente con los tres escenarios principales.
+
+#### Cliente existente
+
+Se verificó:
+
+```text
+transacción válida
+→ Transaction ID único
+→ subida a staging/individual/
+→ recomendación por similitud cliente-cliente
+→ Top 3 alta afinidad
+→ Top oportunidad
+```
+
+#### Cliente nuevo
+
+Se verificó:
+
+```text
+transacción válida
+→ PENDING-UUID
+→ Transaction ID único
+→ subida a staging/individual/
+→ recomendación Item-to-Item
+```
+
+#### Carga masiva
+
+Se verificó mediante un archivo de prueba de:
+
+```text
+3 filas
+27 columnas
+```
+
+El flujo completó:
+
+```text
+lectura
+→ validación
+→ limpieza
+→ 3 filas antes
+→ 3 filas después
+→ subida a staging/batch/
+```
+
+Los objetos utilizados exclusivamente para pruebas fueron eliminados posteriormente de staging para evitar que una futura consolidación los interprete como transacciones reales.
+
+## Componentes pendientes
 
 El repositorio también contiene componentes correspondientes a etapas que todavía deben continuar desarrollándose.
 
 Entre los principales puntos pendientes se encuentran:
 
-- backtesting histórico reproducible;
-- consolidación de tablas de resultados;
-- modelo de datos para Power BI;
-- dashboard de Power BI;
-- métricas y KPIs comerciales;
+- consolidación nocturna productiva de `staging/individual/` y `staging/batch/`;
+- resolución definitiva de identificadores `PENDING-UUID`;
+- asignación segura de nuevos `CUSTXXXXXX`;
+- idempotencia del proceso de consolidación mediante `Transaction ID`;
+- automatización de la consolidación mediante infraestructura programada;
+- sistema de mensajería para campañas de reactivación;
+- automatización completa del pipeline;
+- publicación y distribución definitiva del dashboard Power BI;
 - integración de outputs procesados con BI;
-- evolución del ranking comercial;
-- separación de recomendaciones de afinidad y oportunidades comerciales;
+- métricas y KPIs comerciales adicionales;
 - trazabilidad comercial adicional;
 - futura capa de API;
+- actualización casi en tiempo real del recomendador como posible mejora de escalabilidad;
 - integración final de los componentes dentro del pipeline completo.
 
 La presencia de carpetas o archivos preparados para estas funciones no implica que dichas funcionalidades estén finalizadas.
@@ -1035,15 +1508,41 @@ Los campos `Customer Full Name` y `Customer Email` deben considerarse variables 
 
 ## Criterio actual de inactividad
 
-El criterio vigente del proyecto para considerar a un cliente inactivo es de **270 días**. Este valor reemplaza el criterio anterior de 180 días mencionado en documentación previa.
+El criterio vigente del proyecto para considerar a un cliente inactivo es de **270 días**.
 
-El criterio anterior se mantiene visible dentro de la documentación histórica y del objetivo original del proyecto para conservar la trazabilidad de la evolución de la solución.
+Este valor reemplaza el criterio anterior de 180 días mencionado en documentación histórica.
 
-La evaluación actual de los modelos utiliza además una separación temporal de 270 días, donde las compras del período final se reservan como holdout y la información anterior al corte se utiliza para construir las recomendaciones que luego son evaluadas.
-
-De esta manera se evita utilizar información futura del período de evaluación durante la construcción de las recomendaciones.
+La evaluación actual de los modelos utiliza una separación temporal asociada a este criterio, evitando utilizar compras futuras durante la construcción de las recomendaciones.
 
 El criterio debe diferenciarse de una garantía comercial: considerar un cliente inactivo según este corte constituye una regla operativa del proyecto y no implica afirmar que el cliente haya abandonado definitivamente la empresa.
+
+## Decisión de consistencia temporal
+
+La versión actual de ReActiva no requiere que una transacción realizada durante el día modifique inmediatamente las recomendaciones producidas ese mismo día.
+
+El sistema trabaja con:
+
+```text
+dataset canónico consolidado
+```
+
+para construir recomendaciones.
+
+Las nuevas ventas se almacenan primero en staging y serán incorporadas al dataset histórico durante el proceso de consolidación.
+
+Por lo tanto:
+
+```text
+venta realizada hoy
+→ staging
+→ consolidación
+→ dataset canónico actualizado
+→ recomendador actualizado posteriormente
+```
+
+Esta decisión reduce complejidad, evita leer continuamente todos los objetos de staging y mantiene una arquitectura adecuada para el alcance actual del proyecto.
+
+Una arquitectura de actualización en tiempo real o near-real-time puede implementarse en una futura evolución si el volumen o los requisitos del negocio lo justifican.
 
 ## Dashboard Power BI
 
@@ -1051,7 +1550,9 @@ El proyecto incluye un dashboard interactivo de EDA y calidad desarrollado en Po
 
 El proyecto se encuentra en:
 
-`dashboard/ReActiva_EDA_Quality.pbip`
+```text
+dashboard/ReActiva_EDA_Quality.pbip
+```
 
 Actualmente contiene dos páginas:
 
@@ -1083,7 +1584,9 @@ Las consultas de Power BI utilizan el parámetro `RutaDatosBI` como única ubica
 
 Al trabajar desde una nueva máquina o desde otra ubicación del repositorio, debe modificarse una sola vez este parámetro desde Power Query para que apunte a la carpeta local:
 
-`dashboard/data`
+```text
+dashboard/data
+```
 
 Los archivos locales de caché y configuración de Power BI (`localSettings.json` y `cache.abf`) no se versionan.
 
@@ -1116,6 +1619,11 @@ Entre los problemas ya identificados durante el desarrollo se encuentran situaci
 - duplicación de archivos de dependencias;
 - duplicación de implementaciones del recomendador;
 - diferencias entre el runtime de Streamlit y una futura API;
-- centralización del código utilizado por Docker y Streamlit.
+- centralización del código utilizado por Docker y Streamlit;
+- compatibilidad entre la evolución del modelo de reactivación y las recomendaciones utilizadas por Streamlit;
+- control de cache del dataset histórico;
+- separación de staging para ventas individuales y cargas masivas;
+- validación preventiva de archivos antes de su procesamiento;
+- robustez de la lectura de logs.
 
 La documentación de troubleshooting complementa al README principal: el README describe el estado y funcionamiento general del proyecto, mientras que `docs/troubleshooting/README.md` conserva el historial técnico de problemas confirmados y sus soluciones.

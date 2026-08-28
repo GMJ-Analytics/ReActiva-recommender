@@ -103,7 +103,7 @@ TOP_RECOMENDACIONES = 3
 #funciones para la estructura de la pagina:
 
 
-@st.cache_data(show_spinner='Leyendo dataset historico...')
+@st.cache_data(ttl=3600, show_spinner='Leyendo dataset historico...')
 def cargar_dataset() -> pd.DataFrame:
     """Lee el dataset y normaliza la fecha."""
     try:
@@ -735,7 +735,7 @@ with tabs[0]:
 
             st.text_input(
                 label='Edad',
-                value=age,
+                value=str(age),
                 disabled=True
             )
 
@@ -1264,7 +1264,6 @@ with tabs[0]:
                 top_oportunidad=top_oportunidad,
             )
 
-
 #TAB 2 - carga masiva
 
 with tabs[1]:
@@ -1277,16 +1276,50 @@ with tabs[1]:
         'El archivo se valida antes de guardarse.'
     )
 
+    MAX_UPLOAD_SIZE_MB = 20
+    MAX_UPLOAD_SIZE_BYTES = MAX_UPLOAD_SIZE_MB * 1024 * 1024
 
     uploaded_file = st.file_uploader(
         'Archivo mensual de ventas',
         type=['csv']
     )
 
-
     if uploaded_file is not None:
 
+        # ============================================================
+        # VALIDACION PREVIA DEL ARCHIVO
+        # ============================================================
+
+        if uploaded_file.size == 0:
+
+            st.error(
+                '❌ El archivo esta vacio.'
+            )
+
+            st.stop()
+
+        if uploaded_file.size > MAX_UPLOAD_SIZE_BYTES:
+
+            st.error(
+                f'❌ El archivo supera el limite permitido '
+                f'de {MAX_UPLOAD_SIZE_MB} MB.'
+            )
+
+            log_event(
+                logger,
+                'Archivo rechazado por tamaño',
+                level=40,
+                filename=uploaded_file.name,
+                size_bytes=uploaded_file.size
+            )
+
+            st.stop()
+
         try:
+
+            # ========================================================
+            # LECTURA DEL ARCHIVO
+            # ========================================================
 
             if uploaded_file.name.endswith(
                 '.csv'
@@ -1302,7 +1335,6 @@ with tabs[1]:
                     uploaded_file
                 )
 
-
             log_event(
                 logger,
                 'Archivo cargado por el usuario',
@@ -1310,18 +1342,19 @@ with tabs[1]:
                 rows=len(df_upload)
             )
 
-
             st.write(
                 f'📁 **{uploaded_file.name}** — '
                 f'{len(df_upload)} filas, '
                 f'{len(df_upload.columns)} columnas'
             )
 
+            # ========================================================
+            # FASE 1 - VALIDACION
+            # ========================================================
 
             st.subheader(
                 '🔍 Fase 1: reporte de validacion'
             )
-
 
             validator = DataValidator(
                 df_upload
@@ -1329,9 +1362,7 @@ with tabs[1]:
 
             report = validator.run_checks()
 
-
             m1, m2, m3, m4 = st.columns(4)
-
 
             m1.metric(
                 'Total filas',
@@ -1361,7 +1392,6 @@ with tabs[1]:
                 ]
             )
 
-
             if report[
                 'missing_columns'
             ]:
@@ -1382,11 +1412,9 @@ with tabs[1]:
 
                 st.stop()
 
-
             st.success(
                 '✅ Estructura de columnas valida.'
             )
-
 
             nulos = pd.DataFrame({
                 'nulos':
@@ -1400,11 +1428,9 @@ with tabs[1]:
                     ],
             })
 
-
             nulos = nulos[
                 nulos['nulos'] > 0
             ]
-
 
             if nulos.empty:
 
@@ -1419,17 +1445,18 @@ with tabs[1]:
                     width='stretch'
                 )
 
+            # ========================================================
+            # FASE 2 - LIMPIEZA
+            # ========================================================
 
             st.subheader(
                 '🧹 Fase 2: limpieza e imputacion'
             )
 
-
             forzar = st.checkbox(
                 'Imputar aunque la columna '
                 'supere el 15% de nulos',
             )
-
 
             if st.button(
                 'Ejecutar limpieza',
@@ -1437,7 +1464,6 @@ with tabs[1]:
             ):
 
                 buffer = io.StringIO()
-
 
                 with contextlib_redirect(
                     buffer
@@ -1448,7 +1474,6 @@ with tabs[1]:
                         force_impute_above_threshold=forzar,
                     )
 
-
                 st.session_state[
                     'df_clean'
                 ] = df_clean
@@ -1457,7 +1482,6 @@ with tabs[1]:
                     'clean_log'
                 ] = validator.get_log()
 
-
                 log_event(
                     logger,
                     'Limpieza ejecutada',
@@ -1465,7 +1489,6 @@ with tabs[1]:
                     rows_after=len(df_clean),
                     forzado=forzar
                 )
-
 
             if 'df_clean' in st.session_state:
 
@@ -1477,9 +1500,7 @@ with tabs[1]:
                     'clean_log'
                 ]
 
-
                 c1, c2 = st.columns(2)
-
 
                 c1.metric(
                     'Filas antes',
@@ -1495,13 +1516,11 @@ with tabs[1]:
                     )
                 )
 
-
                 bloqueadas = [
                     linea
                     for linea in clean_log
                     if 'BLOCKED' in linea
                 ]
-
 
                 if bloqueadas:
 
@@ -1511,12 +1530,10 @@ with tabs[1]:
                         'y quedaron sin imputar.'
                     )
 
-
                 st.dataframe(
                     df_clean.head(10),
                     width='stretch'
                 )
-
 
                 with st.expander(
                     'Log de cambios e imputaciones'
@@ -1528,16 +1545,17 @@ with tabs[1]:
                             f'• {linea}'
                         )
 
-
                 st.markdown(
                     '---'
                 )
 
+                # ====================================================
+                # FASE 3 - SUBIDA A STAGING
+                # ====================================================
 
                 st.subheader(
                     '☁️ Fase 3: subida a la base de datos'
                 )
-
 
                 if st.button(
                     '📤 Subir dataset limpio',
@@ -1550,9 +1568,9 @@ with tabs[1]:
 
                         s3_key = upload_df_to_s3(
                             df_clean,
-                            S3_BUCKET
+                            S3_BUCKET,
+                            prefijo='staging/batch',
                         )
-
 
                     if s3_key:
 
@@ -1568,7 +1586,6 @@ with tabs[1]:
                             'con el soporte.'
                         )
 
-
         except Exception as error:
 
             st.error(
@@ -1581,7 +1598,6 @@ with tabs[1]:
                 level=40,
                 error=str(error)
             )
-
 
 #TAB 3 - explorador 360
 
@@ -1959,18 +1975,30 @@ if es_admin:
                     )
 
 
+                    if 'level' not in df_logs.columns:
+
+                        df_logs['level'] = 'UNKNOWN'
+
+                    else:
+
+                        df_logs['level'] = (
+                            df_logs['level']
+                            .fillna('UNKNOWN')
+                            .astype(str)
+                    )
+
+
+                    niveles_disponibles = sorted(
+                        df_logs['level']
+                        .unique()
+                        .tolist()
+                    )
+
+
                     niveles = st.multiselect(
                         'Filtrar por nivel',
-                        options=sorted(
-                            df_logs[
-                                'level'
-                            ].unique()
-                        ),
-                        default=sorted(
-                            df_logs[
-                                'level'
-                            ].unique()
-                        ),
+                        options=niveles_disponibles,
+                        default=niveles_disponibles,
                     )
 
 
