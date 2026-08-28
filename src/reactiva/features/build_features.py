@@ -25,6 +25,32 @@ VALID_SEASONS = (
     "post-monsoon",
 )
 
+# ============================================================
+# Construccion de features
+# ============================================================
+def build_customer_features(df_train):
+    """Build the same customer-level features used by the GBoost model."""
+    cat_counts = df_train.pivot_table(
+        index="Customer ID",
+        columns="Category",
+        values="Item Purchased",
+        aggfunc="count",
+        fill_value=0,
+    )
+    cat_counts.columns = [f"cat_count_{category}" for category in cat_counts.columns]
+
+    agg = df_train.groupby("Customer ID").agg(
+        total_purchases=("Item Purchased", "count"),
+        last_purchase=("Purchase Date", "max"),
+    )
+
+    reference_date = df_train["Purchase Date"].max()
+    agg["days_since_last_purchase"] = (
+        reference_date - agg["last_purchase"]
+    ).dt.days
+    agg = agg.drop(columns="last_purchase")
+
+    return cat_counts.join(agg, how="inner")
 
 # ============================================================
 # TEMPORADA
