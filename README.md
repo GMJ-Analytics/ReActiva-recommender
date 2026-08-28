@@ -472,66 +472,93 @@ Su utilización permite estudiar y aprovechar diferencias observadas entre las u
 
 ### Modelado y comparación de recomendadores
 
-La comparación principal de modelos se encuentra en:
+
+Los modelos de recomendación se evalúan mediante un esquema temporal común.
+
+La evaluación utiliza una separación temporal de **270 días**, donde:
+
+* las compras anteriores al punto de corte se utilizan como información histórica para construir las recomendaciones;
+* el período reciente se utiliza dentro de la lógica de recomendación cuando corresponde;
+* las compras posteriores al corte se reservan como **holdout** para evaluar las recomendaciones.
+
+De esta manera se evita utilizar información futura durante el entrenamiento o la generación de recomendaciones.
+
+La pregunta común de evaluación es:
+
+> **¿Puede la información disponible antes de que un cliente potencialmente inactivo regrese ayudar a predecir qué productos comprará posteriormente?**
+
+Todos los modelos se evalúan comparando:
 
 ```text
-src/reactiva/modeling/model_comparasion_270day_metrics_updated_threshold_070.ipynb
+Productos recomendados
+        vs
+Compras reales futuras
 ```
 
-El notebook evalúa los distintos modelos utilizando una misma separación temporal para asegurar una comparación consistente.
+Los enfoques evaluados incluyen:
 
-La evaluación actual utiliza:
+* Gradient Boosting;
+* Content-Based Recommendation;
+* User-Based Collaborative Filtering;
+* Popularity Baseline.
 
-```text
-Fecha máxima: 2024-12-30
-Fecha de corte: 2024-04-04
-```
+El enfoque Item-Item puede mantenerse como funcionalidad de recomendación basada en similitud de productos, pero no se incluye dentro de los experimentos de aprendizaje comparativos, ya que no realiza un proceso de aprendizaje incremental sobre los datos históricos.
 
-La partición resultante contiene:
-
-- 6.281 filas de entrenamiento;
-- 3.719 filas de holdout;
-- 1.877 clientes presentes tanto en entrenamiento como en holdout y, por lo tanto, disponibles para evaluación.
-
-El período final de 270 días se utiliza como holdout para evaluación.
-
-Actualmente se comparan los siguientes enfoques:
-
-1. User-Based Collaborative Filtering.
-2. Frequency-weighted User-Based.
-3. Content-Based.
-4. Popularity.
-5. Item-Based Collaborative Filtering.
-6. Classification.
-7. Hybrid User-Based CF + Popularity Fallback.
-
-Los resultados principales registrados para Top 5 son:
-
-| Modelo | Precision@5 | Recall@5 | Hit Rate@5 |
-|---|---:|---:|---:|
-| User-Based | 0.0938 | 0.2725 | 0.3841 |
-| Frequency-weighted User-Based | 0.0893 | 0.2230 | 0.3239 |
-| Content-Based | 0.0884 | 0.2254 | 0.3277 |
-| Popularity | 0.1290 | 0.4079 | 0.5440 |
-| Item-Based CF | 0.1139 | 0.3565 | 0.4928 |
-| Classification | 0.1078 | 0.3418 | 0.4681 |
-| Hybrid | 0.0952 | 0.2896 | 0.4033 |
+### Métricas de evaluación
 
 La evaluación no se limita únicamente a Precision, Recall y Hit Rate.
 
-También se incorporan métricas como:
+Se utilizan las siguientes métricas:
 
-- NDCG;
-- MAP;
-- Long-tail Precision;
-- Long-tail Recall;
-- Long-tail Hit Rate;
-- Long-tail Share;
-- Long-tail Catalog Coverage;
-- Average Score;
-- Sparsity.
+* **Precision@K**: proporción de productos recomendados que fueron realmente comprados.
+
+* **Recall@K**: proporción de las compras reales futuras del cliente que fueron recuperadas por la lista de recomendaciones.
+
+* **Hit Rate@K**: indica si al menos uno de los productos recomendados fue comprado por el cliente.
+
+* **NDCG@K**: evalúa la calidad del ranking y otorga mayor importancia a los productos relevantes que aparecen en posiciones superiores.
+
+* **MAP@K**: evalúa la precisión en las posiciones donde aparecen productos relevantes dentro del ranking.
+
+### Métricas Long-Tail
+
+Para evaluar la capacidad de los modelos de recomendar productos menos frecuentes, se define el long-tail utilizando únicamente los datos de entrenamiento.
+
+Los productos se ordenan según su frecuencia de compra y se utiliza un corte de **80% de participación acumulada de compras**. Los productos fuera de la parte principal de la distribución se consideran productos long-tail.
+
+Las métricas adicionales son:
+
+* **Long-tail Precision**: proporción de recomendaciones relevantes que pertenecen al long-tail.
+
+* **Long-tail Recall**: proporción de productos long-tail realmente comprados que fueron recuperados por las recomendaciones.
+
+* **Long-tail Hit Rate**: proporción de clientes para los cuales se recomendó al menos un producto long-tail relevante.
+
+* **Long-tail Share**: proporción de posiciones de recomendación ocupadas por productos long-tail.
+
+* **Long-tail Catalog Coverage**: proporción del catálogo long-tail disponible que aparece al menos una vez en las recomendaciones.
+
+### Average Score y Sparsity
+
+También se reportan:
+
+* **Average Score**: media aritmética de:
+
+  * Precision;
+  * Recall;
+  * Hit Rate;
+  * Long-tail Precision;
+  * Long-tail Recall;
+  * Long-tail Hit Rate;
+  * NDCG;
+  * MAP.
+
+**Long-tail Share**, **Long-tail Catalog Coverage** y **Sparsity** no se incluyen dentro del Average Score, ya que se utilizan como métricas de distribución, cobertura y características del sistema.
+
+* **Sparsity**: mide la proporción de interacciones posibles cliente-producto que no contienen una compra.
 
 Esto permite evaluar los modelos desde diferentes perspectivas y no únicamente por la cantidad de coincidencias entre productos recomendados y compras futuras.
+
 
 ### Optimización mediante Optuna
 

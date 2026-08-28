@@ -4,9 +4,9 @@ from botocore.exceptions import ClientError
 from io import StringIO
 from reactiva.config import S3_BUCKET,API_KEY,S3_PREDICTIONS_KEY
 from reactiva.data.load_data import cargar_datos_as3,descargar_datos_des3
-
+from reactiva.features.build_features import build_customer_features
 import logging
-from sklearn.metrics.pairwise import cosine_similarity
+from sklearn.ensemble import GradientBoostingClassifier
 from reactiva.config import MATRIX_UIR
 from reactiva.features.build_features import (add_season, season_from_month)
 from reactiva.features.context import (recommend_contextual_popularity)
@@ -49,48 +49,9 @@ def _load_similarity_matrix():
 
 
 # ============================================================
-# CUSTOMER PROFILE
+# GRADIENT BOOSTING RECOMMENDER FOR INACTIVE CUSTOMERS
 # ============================================================
 
-def build_customer_profile(df):
-    """
-    Build the customer-item interaction matrix used by the
-    User-Based Collaborative Filtering recommender.
-    """
-
-    customer_item_matrix = (
-        df
-        .groupby(["Customer ID", "Item Purchased"])
-        .size()
-        .unstack(fill_value=0)
-    )
-
-    return customer_item_matrix
-
-
-def build_customer_similarity(df):
-    """
-    Build the customer-to-customer cosine-similarity matrix.
-    """
-
-    customer_item_matrix = build_customer_profile(df)
-
-    similarity = cosine_similarity(
-        customer_item_matrix
-    )
-
-    similarity_df = pd.DataFrame(
-        similarity,
-        index=customer_item_matrix.index,
-        columns=customer_item_matrix.index,
-    )
-
-    return similarity_df
-
-
-# ============================================================
-# USER-BASED RECOMMENDER FOR INACTIVE CUSTOMERS
-# ============================================================
 
 def recommend_user_based_inactive_customers(
     df,
@@ -99,195 +60,150 @@ def recommend_user_based_inactive_customers(
     top_n=5,
 ):
     """
-    Generate recommendations for inactive customers using
-    User-Based Collaborative Filtering.
+    Generate recommendations for inactive customers using Gradient Boosting.
 
-    If the collaborative-filtering model cannot produce usable
-    recommendations, the standardized contextual fallback is used:
+    The function name is intentionally preserved for compatibility with the
+    existing application. The recommendation logic is now GBoost-only:
 
-    season + Location
-        ->
-    Location
-        ->
-    season
-        ->
-    Global
+        historical purchases before the inactivity window
+            -> customer features
+            -> train GBoost using active customers' most frequent recent category
+            -> predict a category for inactive customers
+            -> recommend the top-k most popular recent items in that category
+
+    top_n is retained for backward compatibility with existing callers but is
+    not used by the classifier.
     """
 
-    # --------------------------------------------------------
-    # Add standardized season feature
-    # --------------------------------------------------------
-
-    df = add_season(df)
-
-    # --------------------------------------------------------
-    # Current season
-    # --------------------------------------------------------
-
-    current_month = pd.Timestamp.now().month
-
-    current_season = season_from_month(
-        current_month
-    )
-
-    # --------------------------------------------------------
-    # Find last purchase of every customer
-    # --------------------------------------------------------
-
-    last_purchase = (
-        df
-        .groupby("Customer ID")["Purchase Date"]
-        .max()
-    )
+    data = df.copy()
+    data["Purchase Date"] = pd.to_datetime(data["Purchase Date"])
 
     cutoff_date = (
-        df["Purchase Date"].max()
+        data["Purchase Date"].max()
         - pd.Timedelta(days=inactivity_days)
     )
 
-    inactive_customers = (
-        last_purchase[
-            last_purchase <= cutoff_date
+    # Historical information available before the recent window.
+    df_train = data[
+        data["Purchase Date"] <= cutoff_date
+    ].copy()
+
+    # Recent window used to identify active customers, create labels, and
+    # determine what is currently popular inside each category.
+    df_recent = data[
+        data["Purchase Date"] > cutoff_date
+    ].copy()
+
+    # Possible churn customers: they have historical behavior but did not
+    # purchase during the recent inactivity window.
+    train_customers = set(df_train["Customer ID"].unique())
+    recent_customers = set(df_recent["Customer ID"].unique())
+    inactive_customers = sorted(train_customers - recent_customers)
+
+    if df_train.empty or df_recent.empty or not inactive_customers:
+        logger.info("GBoost recommender skipped: insufficient train/recent data or no inactive customers")
+        return pd.DataFrame()
+
+    features_train = build_customer_features(df_train)
+
+    # Active customers are the supervised training examples. Their label is
+    # their most frequent category during the recent window.
+    labels_recent = (
+        df_recent[
+            df_recent["Customer ID"].isin(features_train.index)
         ]
-        .index
+        .groupby("Customer ID")["Category"]
+        .agg(lambda x: x.mode().iloc[0])
     )
 
-    # --------------------------------------------------------
-    # Most recent location of each inactive customer
-    # --------------------------------------------------------
+    X = features_train.loc[
+        features_train.index.isin(labels_recent.index)
+    ]
+    y = labels_recent.loc[X.index]
 
-    customer_location = (
-        df
+    pred_category_churn = pd.Series(dtype=object)
+
+    if len(X) > 0 and y.nunique() > 1:
+        class_counts = y.value_counts()
+        n_classes = len(class_counts)
+        n_samples = len(y)
+
+        class_weights = {
+            category: n_samples / (n_classes * count)
+            for category, count in class_counts.items()
+        }
+        sample_weight = y.map(class_weights)
+
+        clf = GradientBoostingClassifier(random_state=42)
+        clf.fit(X, y, sample_weight=sample_weight)
+
+        churn_features = features_train.loc[
+            features_train.index.isin(inactive_customers)
+        ]
+
+        if not churn_features.empty:
+            pred_category_churn = pd.Series(
+                clf.predict(churn_features),
+                index=churn_features.index,
+            )
+    else:
+        logger.warning("GBoost recommender could not train: fewer than two target categories")
+
+    # Current candidate pool: most popular recent items within each category.
+    item_pop_by_cat_recent = (
+        df_recent
+        .groupby(["Category", "Item Purchased"])
+        .size()
+        .reset_index(name="count")
+        .sort_values("count", ascending=False)
+    )
+
+    customer_info = (
+        data
         .sort_values("Purchase Date")
-        .groupby("Customer ID")["Location"]
+        .groupby("Customer ID")
         .last()
     )
 
-    # --------------------------------------------------------
-    # Customer-item profile + similarity matrix
-    #
-    # Built on the full purchase history, across all seasons,
-    # so inactive customers with no current-season purchases
-    # still receive a similarity score.
-    # --------------------------------------------------------
-
-    similarity_df = build_customer_similarity(df)
-
-    # --------------------------------------------------------
-    # Purchases from the current season only.
-    #
-    # These purchases form the candidate pool from which
-    # neighbors' recommendations are selected.
-    # --------------------------------------------------------
-
-    current_season_data = df[
-        df["season"] == current_season
-    ]
-
     results = []
 
-    # --------------------------------------------------------
-    # Recommend for each inactive customer
-    # --------------------------------------------------------
-
     for customer_id in inactive_customers:
+        predicted_category = pred_category_churn.get(customer_id, None)
 
-        location = customer_location.loc[
-            customer_id
-        ]
-        c_name = df.loc[df['Customer ID']== customer_id,'Customer Full Name'].iloc[0]
-        c_email =df.loc[df['Customer ID']== customer_id,'Customer Email'].iloc[0]
-
-        # ----------------------------------------------------
-        # User-Based Collaborative Filtering
-        #
-        # Find the customer's nearest neighbors by purchase
-        # profile similarity and recommend their most frequent
-        # products purchased during the current season.
-        # ----------------------------------------------------
-
-        recommendation = []
-
-        if customer_id in similarity_df.index:
-
-            neighbors = (
-                similarity_df[customer_id]
-                .drop(customer_id)
-                .sort_values(ascending=False)
-                .head(top_n)
+        if predicted_category is not None:
+            recommendation = (
+                item_pop_by_cat_recent[
+                    item_pop_by_cat_recent["Category"] == predicted_category
+                ]["Item Purchased"]
+                .head(k)
+                .tolist()
             )
+        else:
+            recommendation = []
 
-            neighbors = neighbors[
-                neighbors > 0
-            ]
-
-            if not neighbors.empty:
-
-                neighbor_purchases = (
-                    current_season_data[
-                        current_season_data[
-                            "Customer ID"
-                        ].isin(neighbors.index)
-                    ]
-                )
-
-                if not neighbor_purchases.empty:
-
-                    recommendation = (
-                        neighbor_purchases[
-                            "Item Purchased"
-                        ]
-                        .value_counts()
-                        .head(k)
-                        .index
-                        .tolist()
-                    )
-
-        # ----------------------------------------------------
-        # Standardized contextual fallback
-        #
-        # Used only when User-Based CF cannot produce usable
-        # recommendations.
-        # ----------------------------------------------------
-
-        if not recommendation:
-
-            contextual_result = (
-                recommend_contextual_popularity(
-                    df=df,
-                    location=location,
-                    season=current_season,
-                    k=k,
-                )
-            )
-
-            recommendation = contextual_result[
-                "recommendations"
-            ]
+        customer = customer_info.loc[customer_id]
 
         results.append(
-            {   "Customer Name":c_name,
-                "Customer Email":c_email,
+            {
+                "Customer Name": customer.get("Customer Full Name", None),
+                "Customer Email": customer.get("Customer Email", None),
                 "Customer ID": customer_id,
-                "Location": location,
-                "Current Season": current_season,
+                "Location": customer.get("Location", None),
+                "Current Season": season_from_month(pd.Timestamp.now().month),
                 "Recommendations": recommendation,
-                "Date": pd.Timestamp.now()
+                "Date": pd.Timestamp.now(),
             }
         )
-    # updating the dataframe in s3#
 
+    # Keep the existing prediction persistence and logging flow unchanged.
     new_df = pd.DataFrame(results)
-    existing_df = descargar_datos_des3(S3_PREDICTIONS_KEY,S3_BUCKET)
-    
-    df_final= pd.concat([existing_df, new_df],ignore_index = True)
+    existing_df = descargar_datos_des3(S3_PREDICTIONS_KEY, S3_BUCKET)
+    df_final = pd.concat([existing_df, new_df], ignore_index=True)
+    cargar_datos_as3(df_final, S3_PREDICTIONS_KEY, S3_BUCKET)
 
-    cargar_datos_as3(df_final,S3_PREDICTIONS_KEY,S3_BUCKET)
+    logger.info("GBoost recommender completed predictions")
 
-    logger.info('recommender completed predictions')
-    
     return pd.DataFrame(results)
-
 
 
 
