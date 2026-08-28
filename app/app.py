@@ -10,7 +10,7 @@ import pandas as pd
 import streamlit as st
 from dotenv import load_dotenv
 
-from reactiva.config import AWS_REGION, DATASET_URI, S3_BUCKET
+from reactiva.config import AWS_REGION, DATASET_URI, S3_BUCKET, USUARIO_ADMIN, PASSWORD_ADMIN
 from reactiva.utils.logger import log_event, setup_logger
 from reactiva.recommender.recommender import (
     get_recommendations_items,
@@ -118,6 +118,40 @@ def cargar_dataset() -> pd.DataFrame:
     )
 
     return df
+
+def pantalla_login() -> None:
+    """
+    Formulario de acceso. Guarda el usuario en session_state y corta la
+    ejecucion del resto de la pagina mientras no haya sesion iniciada.
+    """
+    st.title('🛍️ ReActiva')
+    st.caption('Ingrese sus credenciales para continuar.')
+
+    _, centro, _ = st.columns([1, 2, 1])
+
+    with centro:
+        with st.form('login'):
+            usuario = st.text_input('Usuario')
+            password = st.text_input('Contraseña', type='password')
+            entrar = st.form_submit_button('Ingresar', type='primary')
+
+        if entrar:
+            if not usuario.strip():
+                st.error('Ingrese un nombre de usuario.')
+                return
+
+            st.session_state['usuario'] = usuario.strip()
+            st.session_state['es_admin'] = (
+                usuario.strip() == USUARIO_ADMIN and password == PASSWORD_ADMIN
+            )
+
+            log_event(
+                logger,
+                'Inicio de sesion',
+                usuario=usuario.strip(),
+                rol='admin' if st.session_state['es_admin'] else 'operador',
+            )
+            st.rerun()
 
 
 def campo_categorico(
@@ -581,53 +615,51 @@ def generate_pending_customer_id() -> str:
 
 
 #armado de la pagina:
+st.set_page_config(page_title='ReActiva Recommender', layout='wide', page_icon='🛍️')
 
-st.set_page_config(
-    page_title='ReActiva Recommender',
-    layout='wide',
-    page_icon='🛍️'
-)
+if 'usuario' not in st.session_state:
+    pantalla_login()
+    st.stop()
 
-#para la demo el acceso queda directo, sin usuario ni contraseña
-st.title(
-    '🛍️ ReActiva Recommender'
-)
+es_admin = st.session_state.get('es_admin', False)
 
-st.caption(
-    'Carga de transacciones, validacion de datos '
-    'e interaccion 360 con clientes.'
-)
+encabezado, sesion = st.columns([4, 1])
 
+with encabezado:
+    st.title('🛍️ ReActiva Recommender')
+    st.caption(
+        'Carga de transacciones, validacion de datos e interaccion 360 con clientes.'
+    )
+
+with sesion:
+    rol = 'admin' if es_admin else 'operador'
+    st.markdown(
+        f'<div style="text-align: right;">👤 <b>{st.session_state["usuario"]}</b>'
+        f'<br><small>{rol}</small></div>',
+        unsafe_allow_html=True,
+    )
+    if st.button('Cerrar sesion'):
+        log_event(logger, 'Cierre de sesion', usuario=st.session_state['usuario'])
+        st.session_state.clear()
+        st.rerun()
 
 try:
     df_historico = cargar_dataset()
-
 except Exception as error:
-
     df_historico = None
-
-    st.error(
-        f'No se pudo leer el dataset historico: {error}'
-    )
-
-    log_event(
-        logger,
-        'Fallo la lectura del dataset',
-        level=40,
-        error=str(error)
-    )
-
+    st.error(f'No se pudo leer el dataset historico: {error}')
+    log_event(logger, 'Fallo la lectura del dataset', level=40, error=str(error))
 
 nombres_tabs = [
     '📥 1. Indexacion individual',
     '📂 2. Carga masiva',
     '💡 3. Explorador 360 y CRM',
-    '📜 4. Auditoria y logs',
 ]
 
-tabs = st.tabs(
-    nombres_tabs
-)
+if es_admin:
+    nombres_tabs.append('📜 4. Auditoria y logs')
+
+tabs = st.tabs(nombres_tabs)
 
 
 #TAB 1 - indexacion individual
@@ -910,8 +942,8 @@ with tabs[0]:
 
         transaction_id = st.session_state['current_transaction_id']
 
-        st.caption('ID de transaccion')
-        st.code(transaction_id)
+        #st.caption('ID de transaccion')
+        #st.code(transaction_id)
 
 
     if st.button(
@@ -1834,133 +1866,134 @@ with tabs[2]:
 
 
 #TAB 4 - auditoria y logs
+if es_admin:
 
-with tabs[3]:
+    with tabs[3]:
 
-    st.header(
-        '📜 Auditoria de logs'
-    )
-
-
-    log_dir = Path(
-        'artifacts/logs'
-    )
-
-
-    if not log_dir.exists():
-
-        st.info(
-            'Todavia no se genero '
-            'ningun archivo de log.'
+        st.header(
+            '📜 Auditoria de logs'
         )
 
 
-    else:
-
-        archivos = sorted(
-            log_dir.glob(
-                '*.log'
-            ),
-            reverse=True
+        log_dir = Path(
+            'artifacts/logs'
         )
 
 
-        if not archivos:
+        if not log_dir.exists():
 
             st.info(
-                'El directorio de logs '
-                'esta vacio.'
+                'Todavia no se genero '
+                'ningun archivo de log.'
             )
 
 
         else:
 
-            seleccionado = st.selectbox(
-                'Archivo de registro',
-                [
-                    f.name
-                    for f in archivos
-                ]
+            archivos = sorted(
+                log_dir.glob(
+                    '*.log'
+                ),
+                reverse=True
             )
 
 
-            with open(
-                log_dir / seleccionado,
-                'r',
-                encoding='utf-8'
-            ) as f:
+            if not archivos:
 
-                lineas = f.readlines()
-
-
-            registros = []
-
-
-            for linea in lineas:
-
-                try:
-
-                    registros.append(
-                        json.loads(
-                            linea.strip()
-                        )
-                    )
-
-                except json.JSONDecodeError:
-
-                    continue
-
-
-            if not registros:
-
-                st.warning(
-                    'El archivo no tiene '
-                    'lineas JSON validas.'
+                st.info(
+                    'El directorio de logs '
+                    'esta vacio.'
                 )
 
 
             else:
 
-                df_logs = pd.DataFrame(
-                    registros
+                seleccionado = st.selectbox(
+                    'Archivo de registro',
+                    [
+                        f.name
+                        for f in archivos
+                    ]
                 )
 
 
-                niveles = st.multiselect(
-                    'Filtrar por nivel',
-                    options=sorted(
-                        df_logs[
-                            'level'
-                        ].unique()
-                    ),
-                    default=sorted(
-                        df_logs[
-                            'level'
-                        ].unique()
-                    ),
-                )
+                with open(
+                    log_dir / seleccionado,
+                    'r',
+                    encoding='utf-8'
+                ) as f:
+
+                    lineas = f.readlines()
 
 
-                df_filtrado = df_logs[
-                    df_logs[
-                        'level'
-                    ].isin(
-                        niveles
+                registros = []
+
+
+                for linea in lineas:
+
+                    try:
+
+                        registros.append(
+                            json.loads(
+                                linea.strip()
+                            )
+                        )
+
+                    except json.JSONDecodeError:
+
+                        continue
+
+
+                if not registros:
+
+                    st.warning(
+                        'El archivo no tiene '
+                        'lineas JSON validas.'
                     )
-                ]
 
 
-                st.dataframe(
-                    df_filtrado,
-                    width='stretch'
-                )
+                else:
+
+                    df_logs = pd.DataFrame(
+                        registros
+                    )
 
 
-                st.download_button(
-                    'Descargar log',
-                    data='\n'.join(
-                        lineas
-                    ),
-                    file_name=seleccionado,
-                    mime='text/plain',
-                )
+                    niveles = st.multiselect(
+                        'Filtrar por nivel',
+                        options=sorted(
+                            df_logs[
+                                'level'
+                            ].unique()
+                        ),
+                        default=sorted(
+                            df_logs[
+                                'level'
+                            ].unique()
+                        ),
+                    )
+
+
+                    df_filtrado = df_logs[
+                        df_logs[
+                            'level'
+                        ].isin(
+                            niveles
+                        )
+                    ]
+
+
+                    st.dataframe(
+                        df_filtrado,
+                        width='stretch'
+                    )
+
+
+                    st.download_button(
+                        'Descargar log',
+                        data='\n'.join(
+                            lineas
+                        ),
+                        file_name=seleccionado,
+                        mime='text/plain',
+                    )
