@@ -7,7 +7,6 @@ from reactiva.data.load_data import cargar_datos_as3,descargar_datos_des3
 from reactiva.features.build_features import build_customer_features
 import logging
 from sklearn.ensemble import GradientBoostingClassifier
-from sklearn.metrics.pairwise import cosine_similarity
 from reactiva.config import MATRIX_UIR
 from reactiva.features.build_features import (add_season, season_from_month)
 from reactiva.features.context import (recommend_contextual_popularity)
@@ -47,41 +46,6 @@ def _load_similarity_matrix():
         _similarity_matrix = pd.read_csv(MATRIX_UIR)
 
     return _similarity_matrix
-
-def build_customer_profile(df):
-    """
-    Build the customer-item interaction matrix used by
-    Streamlit for customer similarity recommendations.
-    """
-
-    customer_item_matrix = (
-        df
-        .groupby(["Customer ID", "Item Purchased"])
-        .size()
-        .unstack(fill_value=0)
-    )
-
-    return customer_item_matrix
-
-def build_customer_similarity(df):
-    """
-    Build the customer-to-customer cosine-similarity matrix
-    used by Streamlit for in-store recommendations.
-    """
-
-    customer_item_matrix = build_customer_profile(df)
-
-    similarity = cosine_similarity(
-        customer_item_matrix
-    )
-
-    similarity_df = pd.DataFrame(
-        similarity,
-        index=customer_item_matrix.index,
-        columns=customer_item_matrix.index,
-    )
-
-    return similarity_df
 
 
 # ============================================================

@@ -1,5 +1,7 @@
+import hashlib
 import io
 import json
+import re
 from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
@@ -9,12 +11,12 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 from dotenv import load_dotenv
+from botocore.exceptions import ClientError
 
 from reactiva.config import AWS_REGION, DATASET_URI, S3_BUCKET, USUARIO_ADMIN, PASSWORD_ADMIN
 from reactiva.utils.logger import log_event, setup_logger
 from reactiva.recommender.recommender import (
     get_recommendations_items,
-    build_customer_similarity,
 )
 from reactiva.data.validate_data import FULL_DEFAULT_STRATEGY, DataValidator
 from reactiva.features.build_features import add_season, season_from_date
@@ -98,6 +100,13 @@ DIAS_INACTIVIDAD = 270
 
 #cantidad de recomendaciones que se muestran al vendedor en cada lista
 TOP_RECOMENDACIONES = 3
+
+CANAL_ONLINE = 'Online'
+CANAL_OFFLINE = 'Offline'
+MAX_LOG_PREVIEW_MB = 5
+MAX_LOG_PREVIEW_BYTES = MAX_LOG_PREVIEW_MB * 1024 * 1024
+MAX_LOG_DOWNLOAD_MB = 20
+MAX_LOG_DOWNLOAD_BYTES = MAX_LOG_DOWNLOAD_MB * 1024 * 1024
 
 
 #funciones para la estructura de la pagina:
@@ -241,153 +250,6 @@ def obtener_recomendacion_item(
     return recomendacion, None
 
 
-def obtener_recomendaciones_cliente(
-    df: pd.DataFrame,
-    customer_id,
-    item_purchased,
-    top_n=TOP_RECOMENDACIONES,
-):
-    """
-    Genera las dos listas para un cliente con historial.
-
-    Top positivo:
-    toma los productos con mayor afinidad para el cliente
-    segun las compras de sus clientes mas similares.
-
-    Top negativo:
-    usa la misma lista de productos con afinidad,
-    pero prioriza los productos de menor rotacion global.
-    """
-    if df is None or df.empty:
-        return [], []
-
-    historial = df[
-        df['Customer ID'] == customer_id
-    ]
-
-    if historial.empty:
-        return [], []
-
-    #se reutiliza la similitud entre clientes
-    #del recomendador User-Based
-    similarity_df = build_customer_similarity(df)
-
-    if customer_id not in similarity_df.index:
-        return [], []
-
-    #se buscan los clientes mas similares
-    vecinos = (
-        similarity_df[customer_id]
-        .drop(customer_id)
-        .sort_values(ascending=False)
-    )
-
-    #solo se toman vecinos con similitud real
-    vecinos = vecinos[
-        vecinos > 0
-    ].head(5)
-
-    if vecinos.empty:
-        return [], []
-
-    #se calcula la afinidad del cliente
-    #con cada producto comprado por sus vecinos
-    afinidad_productos = {}
-
-    for vecino_id, similitud in vecinos.items():
-
-        compras_vecino = (
-            df[
-                df['Customer ID'] == vecino_id
-            ]['Item Purchased']
-            .dropna()
-            .astype(str)
-            .value_counts()
-        )
-
-        for producto, cantidad in compras_vecino.items():
-
-            afinidad_productos[producto] = (
-                afinidad_productos.get(producto, 0.0)
-                + float(similitud) * float(cantidad)
-            )
-
-    if not afinidad_productos:
-        return [], []
-
-    #se elimina de las recomendaciones
-    #el producto que se esta comprando actualmente
-    afinidad_productos = {
-        producto: afinidad
-        for producto, afinidad in afinidad_productos.items()
-        if producto != item_purchased
-        and afinidad > 0
-    }
-
-    if not afinidad_productos:
-        return [], []
-
-    # ============================================================
-    # TOP 3 POSITIVO
-    # ============================================================
-
-    #los productos se ordenan de mayor a menor afinidad
-    ranking_afinidad = sorted(
-        afinidad_productos.items(),
-        key=lambda x: x[1],
-        reverse=True,
-    )
-
-    top_positivo = [
-        producto
-        for producto, _ in ranking_afinidad[:top_n]
-    ]
-
-    # ============================================================
-    # TOP 3 NEGATIVO / OPORTUNIDAD
-    # ============================================================
-
-    #se calcula la rotacion de cada producto
-    #en todas las ventas del negocio
-    frecuencia_global = (
-        df['Item Purchased']
-        .dropna()
-        .astype(str)
-        .value_counts()
-    )
-
-    #se usa la misma lista de afinidad
-    #pero sin repetir los productos del Top positivo
-    candidatos_negativos = [
-        producto
-        for producto in afinidad_productos
-        if producto not in top_positivo
-    ]
-
-    #primero se priorizan los productos que menos se venden
-    #y ante empate el que tiene mayor afinidad con el cliente
-    candidatos_negativos = sorted(
-        candidatos_negativos,
-        key=lambda producto: (
-            int(
-                frecuencia_global.get(
-                    producto,
-                    0
-                )
-            ),
-            -afinidad_productos[
-                producto
-            ],
-        ),
-    )
-
-    top_negativo = candidatos_negativos[
-        :top_n
-    ]
-
-    return top_positivo, top_negativo
-
-
 def contextlib_redirect(buffer):
     """
     Alias local de redirect_stdout, para no ensuciar el bloque de imports.
@@ -467,38 +329,59 @@ def recomendar_por_perfil(
 def upload_df_to_s3(
     df: pd.DataFrame,
     bucket_name: str,
-    prefijo: str = 'uploads'
-) -> str:
+    prefijo: str = 'uploads',
+    idempotency_key: str = None
+):
     """
-    Sube un DataFrame a S3 con una key unica.
+    Sube un DataFrame a S3 con una key deterministica.
 
-    Cada carga genera su propio archivo para evitar que dos sucursales
-    escriban sobre el mismo objeto cuando registran ventas al mismo tiempo.
+    Si idempotency_key esta presente se usa para una transaccion individual.
+    Para batch se calcula un hash estable del contenido limpio. La escritura
+    condicional evita duplicados ante doble clic o reintentos.
 
-    Devuelve la key si salio bien y None si fallo, para que el llamador
-    decida que mostrar.
+    Devuelve (s3_key, creado).
     """
+    csv_buffer = io.StringIO()
+    df.to_csv(csv_buffer, index=False)
+    csv_content = csv_buffer.getvalue()
+
+    if idempotency_key:
+        identificador = (
+            str(idempotency_key)
+            .strip()
+            .replace('/', '_')
+            .replace('\\', '_')
+        )
+        hash_content = csv_content
+    else:
+        #hash canonico: mismo lote = misma key aunque cambie el orden
+        hash_df = df.copy().reindex(sorted(df.columns), axis=1)
+        for columna in hash_df.columns:
+            hash_df[columna] = hash_df[columna].map(
+                lambda valor: '' if pd.isna(valor) else str(valor).strip()
+            )
+        if len(hash_df.columns) > 0:
+            hash_df = hash_df.sort_values(
+                by=list(hash_df.columns),
+                kind='mergesort',
+                na_position='first'
+            )
+        hash_content = hash_df.to_csv(index=False, lineterminator='\n')
+        identificador = hashlib.sha256(
+            hash_content.encode('utf-8')
+        ).hexdigest()
+
+    content_hash = hashlib.sha256(
+        hash_content.encode('utf-8')
+    ).hexdigest()
+
+    s3_key = (
+        f'{prefijo}/'
+        f'transactions_clean_'
+        f'{identificador}.csv'
+    )
+
     try:
-        timestamp = datetime.now().strftime(
-            '%Y/%m/%d/%H%M%S_%f'
-        )
-
-        identificador = uuid4().hex[:12]
-
-        s3_key = (
-            f'{prefijo}/'
-            f'transactions_clean_'
-            f'{timestamp}_'
-            f'{identificador}.csv'
-        )
-
-        csv_buffer = io.StringIO()
-
-        df.to_csv(
-            csv_buffer,
-            index=False
-        )
-
         s3_client = boto3.client(
             's3',
             region_name=AWS_REGION
@@ -507,7 +390,8 @@ def upload_df_to_s3(
         s3_client.put_object(
             Bucket=bucket_name,
             Key=s3_key,
-            Body=csv_buffer.getvalue()
+            Body=csv_content,
+            IfNoneMatch='*'
         )
 
         log_event(
@@ -515,21 +399,56 @@ def upload_df_to_s3(
             'Archivo subido a S3',
             bucket=bucket_name,
             key=s3_key,
-            filas=len(df)
+            filas=len(df),
+            content_hash=content_hash
         )
 
-        return s3_key
+        return s3_key, True
 
-    except Exception as error:
+    except ClientError as error:
+        status_code = (
+            error.response
+            .get('ResponseMetadata', {})
+            .get('HTTPStatusCode')
+        )
+        error_code = (
+            error.response
+            .get('Error', {})
+            .get('Code')
+        )
+
+        if (
+            status_code in (409, 412)
+            or error_code in ('PreconditionFailed', 'ConditionalRequestConflict')
+        ):
+            log_event(
+                logger,
+                'Carga duplicada evitada',
+                level=30,
+                bucket=bucket_name,
+                key=s3_key,
+                content_hash=content_hash
+            )
+            return s3_key, False
 
         log_event(
             logger,
             'Error al subir archivo a S3',
             level=40,
-            error=str(error)
+            error=str(error),
+            key=s3_key
         )
+        return None, False
 
-        return None
+    except Exception as error:
+        log_event(
+            logger,
+            'Error al subir archivo a S3',
+            level=40,
+            error=str(error),
+            key=s3_key
+        )
+        return None, False
 
 
 def metricas_cliente(
@@ -540,68 +459,174 @@ def metricas_cliente(
     Arma la ficha 360 de un cliente a partir del historico real.
     """
     historial = df[
-        df['Customer ID'] == customer_id
-    ]
+        df['Customer ID'].astype(str) == str(customer_id)
+    ].copy()
 
     if historial.empty:
         return {}
 
-    ultima = historial[
-        'Purchase Date'
-    ].max()
+    fechas_validas = historial['Purchase Date'].dropna()
+    fecha_referencia = df['Purchase Date'].dropna().max()
 
-    dias_inactivo = (
-        df['Purchase Date'].max()
-        - ultima
-    ).days
+    if fechas_validas.empty or pd.isna(fecha_referencia):
+        ultima = None
+        dias_inactivo = None
+        actividad = 'Sin dato'
+    else:
+        ultima = fechas_validas.max()
+        dias_inactivo = int((fecha_referencia - ultima).days)
+        actividad = (
+            'Bajo'
+            if dias_inactivo >= DIAS_INACTIVIDAD
+            else 'Alto'
+        )
+
+    def moda_segura(columna: str, valor_default: str = 'Sin dato'):
+        if columna not in historial.columns:
+            return valor_default
+        valores = historial[columna].dropna()
+        if valores.empty:
+            return valor_default
+        moda = valores.mode()
+        if moda.empty:
+            return valor_default
+        return moda.to_list()[0]
+
+    montos = pd.to_numeric(
+        historial['Purchase Amount (₹)'],
+        errors='coerce'
+    )
 
     return {
         'compras': len(historial),
-
-        'gasto_total':
-            historial[
-                'Purchase Amount (₹)'
-            ].sum(),
-
-        'ticket':
-            historial[
-                'Purchase Amount (₹)'
-            ].mean(),
-
-        'categoria':
-            historial[
-                'Category'
-            ].mode().iloc[0],
-
-        'marca':
-            historial[
-                'Brand'
-            ].mode().iloc[0],
-
-        'ciudad':
-            historial[
-                'Location'
-            ].mode().iloc[0],
-
-        'ultima':
-            ultima,
-
-        'dias_inactivo':
-            dias_inactivo,
-
-        'actividad':
-            (
-                'Bajo'
-                if dias_inactivo >= DIAS_INACTIVIDAD
-                else 'Alto'
-            ),
-
-        'historial':
-            historial.sort_values(
-                'Purchase Date',
-                ascending=False
-            ),
+        'gasto_total': montos.sum(),
+        'ticket': montos.mean(),
+        'categoria': moda_segura('Category'),
+        'marca': moda_segura('Brand'),
+        'ciudad': moda_segura('Location'),
+        'ultima': ultima,
+        'dias_inactivo': dias_inactivo,
+        'actividad': actividad,
+        'historial': historial.sort_values(
+            'Purchase Date',
+            ascending=False
+        ),
     }
+
+
+def email_valido(email: str) -> bool:
+    """Valida un formato basico de correo electronico."""
+    if not email:
+        return False
+    patron = r'^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$'
+    return bool(re.fullmatch(patron, email.strip()))
+
+
+def normalizar_item_existente(df: pd.DataFrame, item: str):
+    """Devuelve el nombre canonico del item si existe en el historico."""
+    if (
+        df is None
+        or df.empty
+        or 'Item Purchased' not in df.columns
+        or not item
+    ):
+        return None
+
+    item_normalizado = item.strip().casefold()
+    items = (
+        df['Item Purchased']
+        .dropna()
+        .astype(str)
+        .str.strip()
+        .unique()
+        .tolist()
+    )
+
+    for item_historico in items:
+        if item_historico.casefold() == item_normalizado:
+            return item_historico
+    return None
+
+
+def detectar_transaction_ids_duplicados(df: pd.DataFrame) -> list:
+    """Devuelve los Transaction ID repetidos dentro del DataFrame."""
+    if df is None or df.empty or 'Transaction ID' not in df.columns:
+        return []
+    ids = df['Transaction ID'].dropna().astype(str).str.strip()
+    ids = ids[ids != '']
+    return sorted(ids[ids.duplicated(keep=False)].unique().tolist())
+
+
+def contar_transaction_ids_vacios(df: pd.DataFrame) -> int:
+    """Cuenta Transaction ID nulos o vacios."""
+    if df is None or df.empty or 'Transaction ID' not in df.columns:
+        return 0
+    ids = df['Transaction ID'].fillna('').astype(str).str.strip()
+    return int((ids == '').sum())
+
+
+def detectar_transaction_ids_existentes(
+    df_nuevo: pd.DataFrame,
+    df_historico: pd.DataFrame
+) -> list:
+    """Detecta Transaction ID del lote que ya existen en el canonico."""
+    if (
+        df_nuevo is None
+        or df_nuevo.empty
+        or df_historico is None
+        or df_historico.empty
+        or 'Transaction ID' not in df_nuevo.columns
+        or 'Transaction ID' not in df_historico.columns
+    ):
+        return []
+
+    ids_nuevos = {
+        valor for valor in (
+            df_nuevo['Transaction ID']
+            .dropna().astype(str).str.strip().tolist()
+        ) if valor
+    }
+    ids_historicos = {
+        valor for valor in (
+            df_historico['Transaction ID']
+            .dropna().astype(str).str.strip().tolist()
+        ) if valor
+    }
+    return sorted(ids_nuevos.intersection(ids_historicos))
+
+
+def obtener_valor_perfil(historial: pd.DataFrame, columna: str):
+    """Devuelve el valor no nulo mas reciente y si hubo inconsistencias."""
+    if historial is None or historial.empty or columna not in historial.columns:
+        return None, False
+    valores = historial[columna].dropna()
+    if valores.empty:
+        return None, False
+    valor_actual = valores.to_list()[0]
+    inconsistente = valores.astype(str).nunique() > 1
+    return valor_actual, inconsistente
+
+
+def leer_ultimas_lineas_log(
+    ruta: Path,
+    max_bytes: int = MAX_LOG_PREVIEW_BYTES
+):
+    """Lee como maximo los ultimos max_bytes de un archivo de log."""
+    tamanio = ruta.stat().st_size
+    with open(ruta, 'rb') as archivo:
+        if tamanio > max_bytes:
+            archivo.seek(-max_bytes, 2)
+            bloque = archivo.read()
+            primera_nueva_linea = bloque.find(b'\n')
+            if primera_nueva_linea >= 0:
+                bloque = bloque[primera_nueva_linea + 1:]
+            truncado = True
+        else:
+            bloque = archivo.read()
+            truncado = False
+
+    contenido = bloque.decode('utf-8', errors='replace')
+    return contenido.splitlines(), truncado
 
 
 def generate_pending_customer_id() -> str:
@@ -699,85 +724,133 @@ with tabs[0]:
             '👤 Perfil'
         )
 
-        if (
-            modo == 'Cliente existente'
-            and df_historico is not None
-        ):
+        if modo == 'Cliente existente':
+
+            if df_historico is None or df_historico.empty:
+                st.error(
+                    'No se puede consultar un cliente existente '
+                    'porque el dataset historico no esta disponible.'
+                )
+                st.stop()
 
             clientes = sorted(
                 df_historico[
                     'Customer Full Name'
                 ]
                 .dropna()
+                .astype(str)
                 .unique()
                 .tolist()
             )
+
+            if not clientes:
+                st.error('No hay clientes disponibles en el dataset historico.')
+                st.stop()
 
             customer_name = st.selectbox(
                 'Nombre Completo',
                 options=clientes
             )
 
-            datos_cliente = df_historico[
+            datos_cliente = (
                 df_historico[
-                    'Customer Full Name'
+                    df_historico['Customer Full Name'].astype(str)
+                    == str(customer_name)
                 ]
-                == customer_name
-            ]
+                .sort_values('Purchase Date', ascending=False)
+            )
 
-            customer_id = datos_cliente[
-                'Customer ID'
-            ].iloc[0]
+            customer_ids = (
+                datos_cliente['Customer ID']
+                .dropna()
+                .astype(str)
+                .unique()
+                .tolist()
+            )
 
-            age = datos_cliente[
-                'Age'
-            ].iloc[0]
+            if not customer_ids:
+                st.error('No se encontro un Customer ID valido para este cliente.')
+                st.stop()
+
+            if len(customer_ids) > 1:
+                st.warning(
+                    'Hay mas de un Customer ID asociado a este nombre. '
+                    'Seleccione el cliente correcto.'
+                )
+                customer_id = st.selectbox(
+                    'Customer ID',
+                    options=customer_ids
+                )
+                datos_cliente = (
+                    datos_cliente[
+                        datos_cliente['Customer ID'].astype(str)
+                        == str(customer_id)
+                    ]
+                    .sort_values('Purchase Date', ascending=False)
+                )
+            else:
+                customer_id = customer_ids[0]
+
+            age, age_inconsistente = obtener_valor_perfil(datos_cliente, 'Age')
+            gender, gender_inconsistente = obtener_valor_perfil(datos_cliente, 'Gender')
+            location, location_inconsistente = obtener_valor_perfil(datos_cliente, 'Location')
+            email, email_inconsistente = obtener_valor_perfil(
+                datos_cliente,
+                'Customer Email'
+            )
 
             st.text_input(
                 label='Edad',
-                value=str(age),
+                value='' if age is None else str(age),
                 disabled=True
             )
-
-            gender = datos_cliente[
-                'Gender'
-            ].iloc[0]
-
             st.text_input(
                 label='Genero',
-                value=gender,
+                value='' if gender is None else str(gender),
                 disabled=True
             )
-
-            location = datos_cliente[
-                'Location'
-            ].iloc[0]
-
             st.text_input(
                 label='Ciudad',
-                value=location,
+                value='' if location is None else str(location),
                 disabled=True
             )
-
-            email = datos_cliente[
-                'Customer Email'
-            ].iloc[0]
-
             st.text_input(
-                label='Email',
-                value=email,
+                label='Email registrado',
+                value='' if email is None else str(email),
                 disabled=True
             )
+
+            email_confirmacion = st.text_input(
+                'Confirmar email del cliente',
+                placeholder='Repita el email informado por el cliente',
+                key=f'confirmar_email_{customer_id}'
+            )
+
+            campos_inconsistentes = [
+                nombre
+                for nombre, inconsistente in [
+                    ('Edad', age_inconsistente),
+                    ('Genero', gender_inconsistente),
+                    ('Ciudad', location_inconsistente),
+                    ('Email', email_inconsistente),
+                ]
+                if inconsistente
+            ]
+
+            if campos_inconsistentes:
+                st.warning(
+                    'El historial contiene valores diferentes en: '
+                    + ', '.join(campos_inconsistentes)
+                    + '. Se muestra el valor mas reciente.'
+                )
 
             #Previous Purchases representa
             #las compras anteriores a la actual
             previous_purchases = int(
                 len(
                     df_historico[
-                        df_historico[
-                            'Customer ID'
-                        ]
-                        == customer_id
+                        df_historico['Customer ID'].astype(str)
+                        == str(customer_id)
                     ]
                 )
             )
@@ -795,9 +868,13 @@ with tabs[0]:
                 placeholder='Nombre Cliente'
             )
 
-            #el cliente nuevo entra a staging con un ID temporal
-            #el ID definitivo se asignara al consolidar las ventas
-            customer_id = generate_pending_customer_id()
+            #el cliente nuevo entra a staging con un ID temporal estable
+            #durante toda la operacion. El definitivo se asignara al consolidar.
+            if 'current_pending_customer_id' not in st.session_state:
+                st.session_state['current_pending_customer_id'] = (
+                    generate_pending_customer_id()
+                )
+            customer_id = st.session_state['current_pending_customer_id']
 
             age = campo_numerico(
                 'Age',
@@ -821,6 +898,7 @@ with tabs[0]:
                 placeholder='client@example.com'
             )
 
+            email_confirmacion = None
             previous_purchases = 0
 
 
@@ -860,10 +938,9 @@ with tabs[0]:
             '🏬 Canal'
         )
 
-        online_offline = campo_categorico(
-            df_historico,
-            'Online/Offline',
-            'Canal de venta'
+        online_offline = st.selectbox(
+            'Canal de venta',
+            options=[CANAL_OFFLINE, CANAL_ONLINE]
         )
 
         temporada = season_from_date(
@@ -876,7 +953,7 @@ with tabs[0]:
         )
 
 
-    if online_offline == 'Online':
+    if online_offline == CANAL_ONLINE:
 
         campos_visibles = CAMPOS_OPERATIVOS
 
@@ -924,32 +1001,89 @@ with tabs[0]:
         #se rellenan los campos que no se muestran
         #en una venta offline para conservar
         #las 27 columnas del dataset
-        if online_offline != 'Online':
+        if online_offline == CANAL_OFFLINE:
 
             operativos.update(
                 DEFAULTS_OFFLINE
             )
 
 
-        #el ID de transaccion se genera una sola vez por venta
-        #con UUID para evitar duplicados entre distintas sucursales
+        #el ID de transaccion se conserva durante toda la operacion
         if 'current_transaction_id' not in st.session_state:
             st.session_state['current_transaction_id'] = (
-            f'TXN-'
-             f'{datetime.now().strftime("%Y%m%d")}-'
+                f'TXN-'
+                f'{datetime.now().strftime("%Y%m%d")}-'
                 f'{uuid4().hex.upper()}'
-    )
+            )
 
         transaction_id = st.session_state['current_transaction_id']
+        st.session_state.setdefault('transaction_registered', False)
 
-        #st.caption('ID de transaccion')
-        #st.code(transaction_id)
 
+    if st.session_state['transaction_registered']:
+        if st.button('🆕 Nueva operacion'):
+            st.session_state.pop('current_transaction_id', None)
+            st.session_state.pop('current_pending_customer_id', None)
+            st.session_state['transaction_registered'] = False
+            st.rerun()
 
     if st.button(
         '🚀 Registrar y consultar recomendador',
-        type='primary'
+        type='primary',
+        disabled=st.session_state['transaction_registered']
     ):
+
+        #validaciones de identidad
+        if modo == 'Perfil nuevo (sin historial)':
+            customer_name = str(customer_name).strip()
+            email = str(email).strip()
+
+            if not customer_name:
+                st.error('❌ Ingrese el nombre completo del cliente.')
+                st.stop()
+
+            if not email_valido(email):
+                st.error('❌ Ingrese un email valido antes de registrar la venta.')
+                st.stop()
+
+        else:
+            email_registrado = '' if email is None else str(email).strip()
+            email_confirmado = (
+                '' if email_confirmacion is None
+                else str(email_confirmacion).strip()
+            )
+
+            if not email_valido(email_registrado):
+                st.error(
+                    '❌ El cliente existente no tiene un email valido. '
+                    'Registre la compra como Perfil nuevo (sin historial).'
+                )
+                st.stop()
+
+            if email_confirmado.casefold() != email_registrado.casefold():
+                st.error(
+                    '❌ El email informado no coincide con el registrado. '
+                    'Si corresponde a otra persona use Perfil nuevo (sin historial).'
+                )
+                st.stop()
+
+            email = email_registrado
+
+        #en ventas presenciales el item debe existir para Item-to-Item
+        if online_offline == CANAL_OFFLINE:
+            item_canonico = normalizar_item_existente(
+                df_historico,
+                item_purchased
+            )
+            if item_canonico is None:
+                st.error('❌ El item ingresado no existe en el catalogo conocido.')
+                st.stop()
+            item_purchased = item_canonico
+        else:
+            if item_purchased is None or not str(item_purchased).strip():
+                st.error('❌ Ingrese un item valido antes de registrar la venta.')
+                st.stop()
+            item_purchased = str(item_purchased).strip()
 
         record = {
             'Transaction ID':
@@ -1101,27 +1235,28 @@ with tabs[0]:
             )
 
 
-        #cada venta individual se guarda
-        #como un objeto independiente en staging
-        #para evitar que dos sucursales se pisen entre si
-        s3_key = upload_df_to_s3(
+        #cada venta individual usa una key derivada del Transaction ID
+        #para impedir duplicados ante reintentos o doble clic
+        s3_key, creado = upload_df_to_s3(
             single_clean,
             S3_BUCKET,
             prefijo='staging/individual',
+            idempotency_key=transaction_id
         )
 
 
-        if s3_key:
+        if creado:
 
             st.info('Registro enviado a la base de datos')
+            st.session_state['transaction_registered'] = True
 
-            #la transaccion ya fue registrada
-            #se prepara un ID nuevo para la proxima venta
-            st.session_state['current_transaction_id'] = (
-                f'TXN-'
-                f'{datetime.now().strftime("%Y%m%d")}-'
-                f'{uuid4().hex.upper()}'
+        elif s3_key:
+
+            st.warning(
+                'Esta transaccion ya habia sido registrada. '
+                'No se genero un duplicado.'
             )
+            st.session_state['transaction_registered'] = True
 
         else:
 
@@ -1141,11 +1276,9 @@ with tabs[0]:
         )
 
 
-        #por ahora el recomendador asiste
-        #al vendedor en el punto de venta
         #las compras online se registran completas
         #pero no generan recomendacion
-        if online_offline == 'Online':
+        if online_offline == CANAL_ONLINE:
 
             st.info(
                 'La compra online fue registrada. '
@@ -1154,11 +1287,10 @@ with tabs[0]:
                 'ventas realizadas en el local.'
             )
 
+        else:
 
-        elif modo == 'Perfil nuevo (sin historial)':
-
-            #sin historial solo se utiliza
-            #la relacion item-to-item
+            #clientes existentes y nuevos usan Item-to-Item
+            #a partir del producto de la compra actual
             recomendacion, aviso = (
                 obtener_recomendacion_item(
                     item_purchased,
@@ -1166,16 +1298,13 @@ with tabs[0]:
                 )
             )
 
-
             if recomendacion:
 
                 st.success(
                     'Top 3 por similitud con **'
                     + item_purchased
                     + '**: '
-                    + ', '.join(
-                        recomendacion
-                    )
+                    + ', '.join(recomendacion)
                 )
 
                 log_event(
@@ -1188,158 +1317,71 @@ with tabs[0]:
 
             else:
 
-                st.warning(
-                    aviso
-                )
+                st.warning(aviso)
 
                 log_event(
                     logger,
-                    'Recomendacion no disponible '
-                    'para este usuario.',
+                    'Recomendacion no disponible para este usuario.',
                     level=30,
                     item=item_purchased,
                     motivo=aviso,
+                    customer_id=str(customer_id),
                 )
-
-
-        else:
-
-            #con historial se cruza item-to-item
-            #con la afinidad real del cliente
-            (
-                top_afinidad,
-                top_oportunidad
-            ) = obtener_recomendaciones_cliente(
-                df_historico,
-                customer_id,
-                item_purchased,
-                top_n=TOP_RECOMENDACIONES,
-            )
-
-
-            if top_afinidad:
-
-                st.success(
-                    'Top 3 alta afinidad: '
-                    + ', '.join(
-                        top_afinidad
-                    )
-                )
-
-            else:
-
-                st.warning(
-                    'No se encontraron suficientes '
-                    'productos relacionados con el item '
-                    'actual y con el historial '
-                    'de este cliente.'
-                )
-
-
-            if top_oportunidad:
-
-                st.info(
-                    'Top 3 oportunidad: '
-                    + ', '.join(
-                        top_oportunidad
-                    )
-                )
-
-            else:
-
-                st.info(
-                    'No se encontraron productos '
-                    'de oportunidad con afinidad '
-                    'suficiente para este cliente.'
-                )
-
-
-            log_event(
-                logger,
-                'Recomendacion generada',
-                item=item_purchased,
-                fuente='item_based_con_historial',
-                customer_id=str(customer_id),
-                top_afinidad=top_afinidad,
-                top_oportunidad=top_oportunidad,
-            )
 
 #TAB 2 - carga masiva
 
 with tabs[1]:
 
     st.header(
-        'Carga mensual de transacciones a la Base de Datos'
+        'Carga masiva de ventas online'
     )
 
     st.write(
-        'El archivo se valida antes de guardarse.'
+        'Esta seccion incorpora manualmente ventas del canal online '
+        'mientras ReActiva no tenga integracion directa con el e-commerce. '
+        'El archivo se valida antes de enviarse a staging/batch.'
     )
 
     MAX_UPLOAD_SIZE_MB = 20
     MAX_UPLOAD_SIZE_BYTES = MAX_UPLOAD_SIZE_MB * 1024 * 1024
 
     uploaded_file = st.file_uploader(
-        'Archivo mensual de ventas',
+        'Archivo de ventas online',
         type=['csv']
     )
 
     if uploaded_file is not None:
 
-        # ============================================================
-        # VALIDACION PREVIA DEL ARCHIVO
-        # ============================================================
-
         if uploaded_file.size == 0:
-
-            st.error(
-                '❌ El archivo esta vacio.'
-            )
-
+            st.error('❌ El archivo esta vacio.')
             st.stop()
 
         if uploaded_file.size > MAX_UPLOAD_SIZE_BYTES:
-
             st.error(
                 f'❌ El archivo supera el limite permitido '
                 f'de {MAX_UPLOAD_SIZE_MB} MB.'
             )
-
-            log_event(
-                logger,
-                'Archivo rechazado por tamaño',
-                level=40,
-                filename=uploaded_file.name,
-                size_bytes=uploaded_file.size
-            )
-
             st.stop()
 
         try:
+            archivo_bytes = uploaded_file.getvalue()
+            archivo_hash = hashlib.sha256(archivo_bytes).hexdigest()
 
-            # ========================================================
-            # LECTURA DEL ARCHIVO
-            # ========================================================
+            #si cambia el archivo no se reutiliza una limpieza anterior
+            if st.session_state.get('batch_source_hash') != archivo_hash:
+                st.session_state.pop('df_clean', None)
+                st.session_state.pop('clean_log', None)
+                st.session_state['batch_source_hash'] = archivo_hash
 
-            if uploaded_file.name.endswith(
-                '.csv'
-            ):
-
-                df_upload = pd.read_csv(
-                    uploaded_file
-                )
-
-            else:
-
-                df_upload = pd.read_excel(
-                    uploaded_file
-                )
+            uploaded_file.seek(0)
+            df_upload = pd.read_csv(uploaded_file)
 
             log_event(
                 logger,
                 'Archivo cargado por el usuario',
                 filename=uploaded_file.name,
-                rows=len(df_upload)
+                rows=len(df_upload),
+                content_hash=archivo_hash
             )
 
             st.write(
@@ -1351,136 +1393,94 @@ with tabs[1]:
             # ========================================================
             # FASE 1 - VALIDACION
             # ========================================================
+            st.subheader('🔍 Fase 1: reporte de validacion')
 
-            st.subheader(
-                '🔍 Fase 1: reporte de validacion'
-            )
-
-            validator = DataValidator(
-                df_upload
-            )
-
+            validator = DataValidator(df_upload)
             report = validator.run_checks()
 
+            ids_duplicados_archivo = detectar_transaction_ids_duplicados(
+                df_upload
+            )
+            ids_vacios_archivo = contar_transaction_ids_vacios(df_upload)
+
             m1, m2, m3, m4 = st.columns(4)
+            m1.metric('Total filas', report['shape'][0])
+            m2.metric('Columnas faltantes', len(report['missing_columns']))
+            m3.metric('Duplicados exactos', report['duplicate_rows'])
+            m4.metric('Transaction ID repetidos', len(ids_duplicados_archivo))
 
-            m1.metric(
-                'Total filas',
-                report['shape'][0]
-            )
-
-            m2.metric(
-                'Columnas faltantes',
-                len(
-                    report[
-                        'missing_columns'
-                    ]
-                )
-            )
-
-            m3.metric(
-                'Duplicados exactos',
-                report[
-                    'duplicate_rows'
-                ]
-            )
-
-            m4.metric(
-                'Clientes con 1 compra',
-                report[
-                    'orphan_customers'
-                ]
-            )
-
-            if report[
-                'missing_columns'
-            ]:
-
+            if report['missing_columns']:
                 st.error(
                     '❌ Faltan columnas requeridas: '
                     f'{report["missing_columns"]}'
                 )
-
-                log_event(
-                    logger,
-                    'Archivo rechazado',
-                    level=40,
-                    columnas=report[
-                        'missing_columns'
-                    ]
-                )
-
                 st.stop()
 
-            st.success(
-                '✅ Estructura de columnas valida.'
-            )
+            if ids_vacios_archivo > 0:
+                st.error(
+                    f'❌ Se detectaron {ids_vacios_archivo} fila(s) '
+                    'sin Transaction ID. La carga queda bloqueada.'
+                )
+                st.stop()
+
+            if ids_duplicados_archivo:
+                st.error(
+                    f'❌ El archivo contiene {len(ids_duplicados_archivo)} '
+                    'Transaction ID repetido(s).'
+                )
+                with st.expander('Ver Transaction ID repetidos'):
+                    st.code('\n'.join(ids_duplicados_archivo[:50]))
+                st.stop()
+
+            #el batch representa exclusivamente ventas online
+            if 'Online/Offline' in df_upload.columns:
+                canales = (
+                    df_upload['Online/Offline']
+                    .fillna('')
+                    .astype(str)
+                    .str.strip()
+                    .str.casefold()
+                )
+                filas_invalidas = canales != CANAL_ONLINE.casefold()
+                if filas_invalidas.any():
+                    st.error(
+                        '❌ La carga masiva corresponde exclusivamente '
+                        'a ventas online. Hay registros vacios o distintos de Online.'
+                    )
+                    st.stop()
+
+            st.success('✅ Estructura de columnas valida.')
 
             nulos = pd.DataFrame({
-                'nulos':
-                    report[
-                        'null_counts'
-                    ],
-
-                'porcentaje':
-                    report[
-                        'null_pct'
-                    ],
+                'nulos': report['null_counts'],
+                'porcentaje': report['null_pct'],
             })
-
-            nulos = nulos[
-                nulos['nulos'] > 0
-            ]
+            nulos = nulos[nulos['nulos'] > 0]
 
             if nulos.empty:
-
-                st.success(
-                    'Sin nulos en el archivo.'
-                )
-
+                st.success('Sin nulos en el archivo.')
             else:
-
-                st.dataframe(
-                    nulos,
-                    width='stretch'
-                )
+                st.dataframe(nulos, width='stretch')
 
             # ========================================================
             # FASE 2 - LIMPIEZA
             # ========================================================
-
-            st.subheader(
-                '🧹 Fase 2: limpieza e imputacion'
-            )
+            st.subheader('🧹 Fase 2: limpieza e imputacion')
 
             forzar = st.checkbox(
-                'Imputar aunque la columna '
-                'supere el 15% de nulos',
+                'Imputar aunque la columna supere el 15% de nulos'
             )
 
-            if st.button(
-                'Ejecutar limpieza',
-                type='secondary'
-            ):
-
+            if st.button('Ejecutar limpieza', type='secondary'):
                 buffer = io.StringIO()
-
-                with contextlib_redirect(
-                    buffer
-                ):
-
+                with contextlib_redirect(buffer):
                     df_clean = validator.clean(
                         strategy=FULL_DEFAULT_STRATEGY,
                         force_impute_above_threshold=forzar,
                     )
 
-                st.session_state[
-                    'df_clean'
-                ] = df_clean
-
-                st.session_state[
-                    'clean_log'
-                ] = validator.get_log()
+                st.session_state['df_clean'] = df_clean
+                st.session_state['clean_log'] = validator.get_log()
 
                 log_event(
                     logger,
@@ -1491,107 +1491,121 @@ with tabs[1]:
                 )
 
             if 'df_clean' in st.session_state:
+                df_clean = st.session_state['df_clean']
+                clean_log = st.session_state['clean_log']
 
-                df_clean = st.session_state[
-                    'df_clean'
-                ]
+                if df_clean.empty:
+                    st.error('❌ La limpieza no dejo filas validas para staging.')
+                    st.stop()
 
-                clean_log = st.session_state[
-                    'clean_log'
-                ]
+                ids_duplicados_limpios = detectar_transaction_ids_duplicados(
+                    df_clean
+                )
+                ids_vacios_limpios = contar_transaction_ids_vacios(df_clean)
+
+                if ids_vacios_limpios > 0 or ids_duplicados_limpios:
+                    st.error(
+                        '❌ El dataset limpio no conserva Transaction ID '
+                        'validos y unicos. La subida queda bloqueada.'
+                    )
+                    st.stop()
 
                 c1, c2 = st.columns(2)
-
-                c1.metric(
-                    'Filas antes',
-                    len(df_upload)
-                )
-
+                c1.metric('Filas antes', len(df_upload))
                 c2.metric(
                     'Filas despues',
                     len(df_clean),
-                    delta=(
-                        len(df_clean)
-                        - len(df_upload)
-                    )
+                    delta=len(df_clean) - len(df_upload)
                 )
 
                 bloqueadas = [
-                    linea
-                    for linea in clean_log
+                    linea for linea in clean_log
                     if 'BLOCKED' in linea
                 ]
-
                 if bloqueadas:
-
                     st.warning(
-                        f'{len(bloqueadas)} columna(s) '
-                        'superaron el umbral de nulos '
-                        'y quedaron sin imputar.'
+                        f'{len(bloqueadas)} columna(s) superaron el umbral '
+                        'de nulos y quedaron sin imputar.'
                     )
 
-                st.dataframe(
-                    df_clean.head(10),
-                    width='stretch'
-                )
+                st.dataframe(df_clean.head(10), width='stretch')
 
-                with st.expander(
-                    'Log de cambios e imputaciones'
-                ):
-
+                with st.expander('Log de cambios e imputaciones'):
                     for linea in clean_log:
+                        st.text(f'• {linea}')
 
-                        st.text(
-                            f'• {linea}'
+                st.markdown('---')
+
+                # ====================================================
+                # FASE 3 - CONSISTENCIA CONTRA CANONICO
+                # ====================================================
+                st.subheader('🔗 Fase 3: control de consistencia')
+
+                consistencia_bloqueada = False
+
+                if df_historico is None or df_historico.empty:
+                    consistencia_bloqueada = True
+                    st.error(
+                        '❌ No se pudo consultar el dataset canonico. '
+                        'La carga queda bloqueada para evitar duplicados.'
+                    )
+                else:
+                    ids_existentes = detectar_transaction_ids_existentes(
+                        df_clean,
+                        df_historico
+                    )
+
+                    if ids_existentes:
+                        consistencia_bloqueada = True
+                        st.error(
+                            f'❌ La carga contiene {len(ids_existentes)} '
+                            'Transaction ID que ya existen en el dataset canonico.'
+                        )
+                        with st.expander('Ver Transaction ID existentes'):
+                            st.code('\n'.join(ids_existentes[:50]))
+                    else:
+                        st.success(
+                            '✅ No se encontraron Transaction ID '
+                            'ya presentes en el dataset canonico.'
                         )
 
-                st.markdown(
-                    '---'
+                st.caption(
+                    'El control global entre objetos de staging corresponde '
+                    'al proceso de consolidacion nocturna y queda fuera de este PR.'
                 )
 
                 # ====================================================
-                # FASE 3 - SUBIDA A STAGING
+                # FASE 4 - SUBIDA A STAGING
                 # ====================================================
-
-                st.subheader(
-                    '☁️ Fase 3: subida a la base de datos'
-                )
+                st.subheader('☁️ Fase 4: subida a staging')
 
                 if st.button(
                     '📤 Subir dataset limpio',
-                    type='primary'
+                    type='primary',
+                    disabled=consistencia_bloqueada
                 ):
-
-                    with st.spinner(
-                        'Guardando en Base de Datos...'
-                    ):
-
-                        s3_key = upload_df_to_s3(
+                    with st.spinner('Guardando en Base de Datos...'):
+                        s3_key, creado = upload_df_to_s3(
                             df_clean,
                             S3_BUCKET,
-                            prefijo='staging/batch',
+                            prefijo='staging/batch'
                         )
 
-                    if s3_key:
-
-                        st.success(
-                            '🎉 Subido a la Base de Datos'
+                    if creado:
+                        st.success('🎉 Archivo enviado a staging/batch.')
+                    elif s3_key:
+                        st.warning(
+                            '⚠️ Este mismo contenido ya habia sido cargado. '
+                            'No se genero una copia duplicada.'
                         )
-
                     else:
-
                         st.error(
-                            '⚠️ Fallo la subida. '
-                            'Reintente o comuniquese '
+                            '⚠️ Fallo la subida. Reintente o comuniquese '
                             'con el soporte.'
                         )
 
         except Exception as error:
-
-            st.error(
-                f'Error al procesar el archivo: {error}'
-            )
-
+            st.error(f'Error al procesar el archivo: {error}')
             log_event(
                 logger,
                 'Error en carga masiva',
@@ -1608,13 +1622,12 @@ with tabs[2]:
     )
 
 
-    if df_historico is None:
+    if df_historico is None or df_historico.empty:
 
         st.warning(
             'Sin dataset cargado '
             'no se puede construir la ficha.'
         )
-
 
     else:
 
@@ -1623,10 +1636,10 @@ with tabs[2]:
                 'Customer Full Name'
             ]
             .dropna()
+            .astype(str)
             .unique()
             .tolist()
         )
-
 
         cliente = st.selectbox(
             'Cliente',
@@ -1634,15 +1647,38 @@ with tabs[2]:
             key='cliente_360'
         )
 
-
-        cliente_id = df_historico.loc[
+        historial_nombre = (
             df_historico[
-                'Customer Full Name'
+                df_historico['Customer Full Name'].astype(str)
+                == str(cliente)
             ]
-            == cliente,
-            'Customer ID',
-        ].iloc[0]
+            .sort_values('Purchase Date', ascending=False)
+        )
 
+        cliente_ids = (
+            historial_nombre['Customer ID']
+            .dropna()
+            .astype(str)
+            .unique()
+            .tolist()
+        )
+
+        if not cliente_ids:
+            st.warning('No se encontro un Customer ID valido para este cliente.')
+            st.stop()
+
+        if len(cliente_ids) > 1:
+            st.warning(
+                'Hay mas de un Customer ID asociado a este nombre. '
+                'Seleccione el cliente correcto.'
+            )
+            cliente_id = st.selectbox(
+                'Customer ID',
+                options=cliente_ids,
+                key='cliente_id_360'
+            )
+        else:
+            cliente_id = cliente_ids[0]
 
         datos = metricas_cliente(
             df_historico,
@@ -1660,7 +1696,7 @@ with tabs[2]:
         else:
 
             st.markdown(
-                f'### 🪪 Ficha 360 — Cliente {cliente}'
+                f'### 🪪 Ficha 360 — {cliente} ({cliente_id})'
             )
 
 
@@ -1691,13 +1727,16 @@ with tabs[2]:
             )
 
 
+            delta_actividad = (
+                'Sin fecha de compra valida'
+                if datos['dias_inactivo'] is None
+                else f'{datos["dias_inactivo"]} dias sin comprar'
+            )
+
             f5.metric(
                 'Actividad',
                 datos['actividad'],
-                delta=(
-                    f'{datos["dias_inactivo"]} '
-                    'dias sin comprar'
-                ),
+                delta=delta_actividad,
                 delta_color=(
                     'inverse'
                     if datos['actividad'] == 'Bajo'
@@ -1800,7 +1839,7 @@ with tabs[2]:
                     log_event(
                         logger,
                         'Campaña simulada',
-                        customer_id=cliente,
+                        customer_id=str(cliente_id),
                         canal=canal,
                         descuento=descuento,
                         motivo=motivo
@@ -1826,8 +1865,10 @@ with tabs[2]:
                 )
 
 
+                clave_notas = str(cliente_id)
+
                 previas = notas.get(
-                    cliente,
+                    clave_notas,
                     []
                 )
 
@@ -1856,14 +1897,14 @@ with tabs[2]:
 
 
                     notas[
-                        cliente
+                        clave_notas
                     ] = previas
 
 
                     log_event(
                         logger,
                         'Nota CRM agregada',
-                        customer_id=cliente
+                        customer_id=str(cliente_id)
                     )
 
 
@@ -1890,11 +1931,9 @@ if es_admin:
             '📜 Auditoria de logs'
         )
 
-
         log_dir = Path(
             'artifacts/logs'
         )
-
 
         if not log_dir.exists():
 
@@ -1903,16 +1942,12 @@ if es_admin:
                 'ningun archivo de log.'
             )
 
-
         else:
 
             archivos = sorted(
-                log_dir.glob(
-                    '*.log'
-                ),
+                log_dir.glob('*.log'),
                 reverse=True
             )
-
 
             if not archivos:
 
@@ -1921,79 +1956,54 @@ if es_admin:
                     'esta vacio.'
                 )
 
-
             else:
 
                 seleccionado = st.selectbox(
                     'Archivo de registro',
-                    [
-                        f.name
-                        for f in archivos
-                    ]
+                    [f.name for f in archivos]
                 )
 
+                ruta_log = log_dir / seleccionado
+                tamanio_log = ruta_log.stat().st_size
+                lineas, truncado = leer_ultimas_lineas_log(ruta_log)
 
-                with open(
-                    log_dir / seleccionado,
-                    'r',
-                    encoding='utf-8'
-                ) as f:
-
-                    lineas = f.readlines()
-
+                if truncado:
+                    st.info(
+                        'ℹ️ Para proteger la memoria se muestran solo los ultimos '
+                        f'{MAX_LOG_PREVIEW_MB} MB del archivo.'
+                    )
 
                 registros = []
 
-
                 for linea in lineas:
-
                     try:
-
-                        registros.append(
-                            json.loads(
-                                linea.strip()
-                            )
-                        )
-
-                    except json.JSONDecodeError:
-
+                        registros.append(json.loads(linea.strip()))
+                    except (json.JSONDecodeError, TypeError):
                         continue
-
 
                 if not registros:
 
                     st.warning(
-                        'El archivo no tiene '
+                        'La porcion leida del archivo no tiene '
                         'lineas JSON validas.'
                     )
 
-
                 else:
 
-                    df_logs = pd.DataFrame(
-                        registros
-                    )
-
+                    df_logs = pd.DataFrame(registros)
 
                     if 'level' not in df_logs.columns:
-
                         df_logs['level'] = 'UNKNOWN'
-
                     else:
-
                         df_logs['level'] = (
                             df_logs['level']
                             .fillna('UNKNOWN')
                             .astype(str)
-                    )
-
+                        )
 
                     niveles_disponibles = sorted(
-                        df_logs['level']
-                        .unique()
-                        .tolist()
+                        df_logs['level'].unique().tolist()
                     )
-
 
                     niveles = st.multiselect(
                         'Filtrar por nivel',
@@ -2001,27 +2011,25 @@ if es_admin:
                         default=niveles_disponibles,
                     )
 
-
                     df_filtrado = df_logs[
-                        df_logs[
-                            'level'
-                        ].isin(
-                            niveles
-                        )
+                        df_logs['level'].isin(niveles)
                     ]
-
 
                     st.dataframe(
                         df_filtrado,
                         width='stretch'
                     )
 
-
+                if tamanio_log <= MAX_LOG_DOWNLOAD_BYTES:
                     st.download_button(
                         'Descargar log',
-                        data='\n'.join(
-                            lineas
-                        ),
+                        data=ruta_log.read_bytes(),
                         file_name=seleccionado,
                         mime='text/plain',
+                    )
+                else:
+                    st.info(
+                        'ℹ️ La descarga desde Streamlit esta limitada a '
+                        f'{MAX_LOG_DOWNLOAD_MB} MB para evitar cargar '
+                        'archivos grandes completos en memoria.'
                     )

@@ -90,50 +90,52 @@ Después de reemplazar o actualizar un dataset en S3 se debe realizar una valida
 
 ### Contexto
 
-Durante la validación de la limpieza reproducible de datos de la Issue #28 se revisó la regla utilizada para eliminar transacciones duplicadas.
+Durante la validación de la limpieza reproducible de datos de la Issue #28 se revisó la regla utilizada para detectar transacciones duplicadas.
 
 ### Problema
 
-La lógica existente utilizaba como clave:
+La lógica inicial utilizaba como clave:
 
 `Customer ID + Item Purchased + Purchase Date`
 
-Con esa combinación se identificaban como duplicadas dos filas del dataset actual y eran eliminadas durante la limpieza, reduciendo incorrectamente la cantidad de transacciones.
+Con esa combinación podían identificarse como duplicadas compras legítimas realizadas por un mismo cliente sobre el mismo producto y fecha.
+
+Posteriormente se incorporó `Transaction ID` dentro de una clave compuesta, pero durante la revisión final se determinó que la identidad transaccional debía depender directamente de `Transaction ID`.
 
 ### Causa
 
-La clave utilizada no incluía `Transaction ID`. Un mismo cliente puede comprar el mismo producto más de una vez en la misma fecha y cada operación seguir siendo una transacción válida e independiente.
+`Transaction ID` es el identificador único de una operación.
+
+Dos registros que tengan diferentes `Transaction ID` representan transacciones distintas aunque coincidan en cliente, producto y fecha.
+
+Por el contrario, dos registros distintos que compartan el mismo `Transaction ID` representan un conflicto de integridad y no deben resolverse silenciosamente eliminando una de las filas.
 
 ### Solución aplicada
 
-Se incorporó `Transaction ID` a la clave utilizada para detectar duplicados:
+La validación quedó basada en:
 
-`Transaction ID + Customer ID + Item Purchased + Purchase Date`
+`Transaction ID`
 
-Además, si `Transaction ID` no está disponible, no se utiliza automáticamente la regla anterior de tres campos para eliminar filas.
+como identidad única de la operación.
 
-Se agregaron tests automáticos para validar ambos escenarios.
+La clave `duplicate_key_rows` se mantiene en el reporte por compatibilidad con los consumidores existentes, pero actualmente representa la cantidad de `Transaction ID` duplicados.
+
+La limpieza conserva la eliminación de filas completamente idénticas, pero no elimina silenciosamente conflictos donde un mismo `Transaction ID` identifica registros diferentes.
 
 ### Resultado
 
-Sobre el dataset actual:
+Dos compras del mismo cliente, producto y fecha con distintos `Transaction ID` permanecen como transacciones independientes.
 
-- filas originales: 10.000;
-- filas luego de la limpieza: 10.000;
-- duplicados exactos eliminados: 0;
-- duplicados por clave transaccional eliminados: 0.
-
-También se validó que dos compras del mismo cliente, producto y fecha con distintos `Transaction ID` permanezcan como transacciones independientes.
+Un `Transaction ID` repetido se considera un problema de integridad que debe ser corregido antes de continuar.
 
 ### Prevención
 
-Las reglas de deduplicación deben basarse en identificadores que permitan distinguir transacciones reales.
+Toda modificación futura de la lógica de deduplicación debe validar al menos:
 
-Toda modificación futura de la clave de deduplicación debe estar acompañada por tests que verifiquen al menos:
-
-- transacciones distintas que comparten cliente, producto y fecha;
-- duplicados reales con la misma clave transaccional;
-- comportamiento cuando `Transaction ID` no está disponible.
+- `Transaction ID` vacío;
+- `Transaction ID` duplicado;
+- compras con mismo cliente, producto y fecha pero distintos `Transaction ID`;
+- registros diferentes asociados al mismo `Transaction ID`.
 
 ---
 
@@ -497,67 +499,47 @@ Al importar CSV generados por Python en Power BI:
 
 ---
 
----
-
 ## 2026-08-28 - Incompatibilidad entre el nuevo modelo de reactivación y Streamlit
 
 ### Contexto
 
 Después de integrar a `main` la nueva implementación del recomendador basada en Gradient Boosting para clientes inactivos, se actualizó la rama de Streamlit con los cambios más recientes del repositorio.
 
-La aplicación Streamlit utiliza además recomendaciones comerciales para clientes existentes que realizan compras en el punto de venta.
+La aplicación Streamlit también genera recomendaciones comerciales durante las ventas realizadas en el punto de venta.
 
 ### Problema
 
-La nueva versión de:
-
-```text
-src/reactiva/recommender/recommender.py
-```
-
-había eliminado las funciones:
+Streamlit continuaba importando y utilizando:
 
 ```python
-build_customer_profile()
 build_customer_similarity()
 ```
 
-mientras que:
+para generar recomendaciones mediante similitud Customer-Customer.
 
-```text
-app/app.py
-```
-
-continuaba importando y utilizando `build_customer_similarity()` para generar recomendaciones comerciales de clientes existentes.
-
-Esto producía una incompatibilidad entre el nuevo recomendador de reactivación y la aplicación Streamlit.
+Esta lógica había quedado obsoleta respecto de la arquitectura vigente del recomendador.
 
 ### Causa
 
-Las funciones de similitud cliente-cliente habían formado parte anteriormente del recomendador utilizado para clientes inactivos.
+La similitud cliente-cliente correspondía a una etapa anterior del desarrollo y todavía permanecía conectada al flujo de Streamlit.
 
-Al reemplazarse esa lógica de reactivación por Gradient Boosting, dejaron de ser necesarias dentro de ese flujo y fueron eliminadas.
-
-Sin embargo, Streamlit seguía utilizando la similitud cliente-cliente para una responsabilidad diferente: generar recomendaciones de venta asistida para clientes con historial que se encuentran comprando en una tienda física.
-
-Por lo tanto, la eliminación era válida para el flujo de reactivación, pero no para todos los consumidores del módulo.
+El modelo de reactivación ya había evolucionado hacia Gradient Boosting y el flujo operativo de venta local podía resolverse utilizando la similitud entre productos a partir del producto que el cliente está comprando.
 
 ### Solución aplicada
 
-Se mantuvo sin modificaciones la implementación de Gradient Boosting utilizada para clientes inactivos y se reincorporaron únicamente:
+Se mantuvo sin modificaciones la implementación de Gradient Boosting utilizada para clientes inactivos.
+
+La similitud Customer-Customer fue eliminada del flujo de Streamlit.
+
+No se restauró:
 
 ```python
-build_customer_profile()
 build_customer_similarity()
 ```
 
-junto con:
+ni la similitud coseno entre clientes.
 
-```python
-from sklearn.metrics.pairwise import cosine_similarity
-```
-
-De esta manera quedaron diferenciadas las responsabilidades:
+La arquitectura vigente quedó:
 
 ```text
 Cliente inactivo >= 270 días
@@ -565,50 +547,35 @@ Cliente inactivo >= 270 días
 → recomendación de reactivación
 ```
 
-y:
-
 ```text
-Cliente existente en tienda
-→ similitud cliente-cliente
-→ recomendaciones de afinidad y oportunidad
+Cliente existente Offline
+→ producto comprado actualmente
+→ Item-to-Item
+→ recomendación
 ```
 
-Para clientes nuevos sin historial se mantiene el mecanismo:
-
 ```text
-Item-to-Item
+Cliente nuevo Offline
+→ producto comprado actualmente
+→ Item-to-Item
+→ recomendación
 ```
 
-basado en el producto que se encuentra comprando.
+Las operaciones Online se registran, pero no generan recomendaciones en Streamlit.
 
 ### Resultado
 
-Streamlit volvió a importar correctamente el recomendador canónico.
+Streamlit utiliza Item-to-Item para las recomendaciones asociadas a ventas locales tanto de clientes existentes como nuevos.
 
-Se validó funcionalmente:
+El modelo Gradient Boosting mantiene exclusivamente su responsabilidad sobre clientes inactivos.
 
-- cliente existente;
-- generación de Top 3 de alta afinidad;
-- generación de recomendaciones de oportunidad;
-- cliente nuevo mediante `PENDING-UUID`;
-- recomendación Item-to-Item;
-- persistencia de las transacciones individuales en S3.
-
-La incorporación de las funciones de similitud no modifica ni reemplaza el modelo Gradient Boosting de reactivación.
+La lógica User-Based / Customer-Customer deja de formar parte del flujo productivo vigente.
 
 ### Prevención
 
-Antes de eliminar una función reutilizable de:
+Las funciones utilizadas durante etapas experimentales no deben mantenerse en el flujo productivo únicamente por compatibilidad histórica.
 
-```text
-src/reactiva/
-```
-
-debe verificarse si existen consumidores externos dentro del repositorio.
-
-Una función que deje de utilizarse dentro de un modelo particular no necesariamente constituye código muerto si continúa siendo utilizada por Streamlit, notebooks, pipelines u otros componentes.
-
-Los cambios de modelado deben revisarse considerando las responsabilidades de todos los consumidores del módulo canónico.
+Antes de conservar o restaurar una función debe verificarse si continúa formando parte de la arquitectura vigente y si existe un consumidor real que todavía la necesite.
 
 ---
 
@@ -747,25 +714,21 @@ archivo masivo
 → staging/batch/
 ```
 
-Cada subida utiliza además una key única basada en fecha, hora y un identificador aleatorio, evitando que dos operaciones concurrentes intenten sobrescribir el mismo objeto.
+La persistencia utiliza identificadores estables de la operación para evitar que una segunda ejecución accidental genere una segunda copia lógica de la misma transacción o lote.
 
 ### Resultado
 
-Se validaron funcionalmente ambos caminos contra Amazon S3.
-
-Las ventas individuales fueron almacenadas correctamente bajo:
+Las ventas individuales se almacenan bajo:
 
 ```text
 staging/individual/
 ```
 
-y una carga de prueba de tres transacciones fue almacenada correctamente bajo:
+y las cargas masivas bajo:
 
 ```text
 staging/batch/
 ```
-
-Los archivos generados exclusivamente para la prueba fueron eliminados posteriormente para evitar que una futura consolidación los procese como ventas reales.
 
 La separación deja preparado el origen de datos para que el proceso nocturno pueda consumir ambos tipos de staging de forma controlada.
 
@@ -811,7 +774,7 @@ level
 
 con valores válidos.
 
-Un archivo histórico, externo o parcialmente malformado podía no incluir ese campo o contener valores nulos, generando errores al construir el filtro.
+Además, leer indefinidamente un archivo de log completo podía generar un consumo innecesario de memoria a medida que aumentara su tamaño.
 
 ### Causa
 
@@ -819,7 +782,7 @@ Las validaciones existentes estaban orientadas principalmente a la calidad inter
 
 El tamaño del archivo todavía no se verificaba antes de su lectura.
 
-Por otra parte, los logs generados actualmente incluyen normalmente el campo `level`, pero el visor administrativo no contemplaba defensivamente registros históricos o externos con esquemas incompletos.
+Por otra parte, los logs generados actualmente incluyen normalmente el campo `level`, pero el visor administrativo no contemplaba defensivamente registros históricos o externos con esquemas incompletos ni el crecimiento continuo del archivo.
 
 ### Solución aplicada
 
@@ -843,24 +806,16 @@ con:
 [server]
 maxUploadSize = 20
 ```
+
 La configuración también se copia dentro de la imagen Docker mediante:
 
 ```dockerfile
 COPY .streamlit ./.streamlit
 ```
 
-Esto evita que la ejecución dentro del contenedor vuelva al límite por defecto de Streamlit y mantiene el mismo comportamiento entre desarrollo local y Docker.
+Además, la aplicación mantiene una validación defensiva propia antes de procesar el CSV.
 
-De esta manera Streamlit impide seleccionar archivos superiores al límite configurado.
-
-Además, la aplicación mantiene una validación defensiva propia mediante:
-
-```python
-MAX_UPLOAD_SIZE_MB = 20
-MAX_UPLOAD_SIZE_BYTES = MAX_UPLOAD_SIZE_MB * 1024 * 1024
-```
-
-Antes de procesar el CSV se verifica:
+Antes de procesar el archivo se verifica:
 
 ```text
 archivo vacío
@@ -874,51 +829,21 @@ archivo > 20 MB
 → rechazar
 ```
 
-Solamente después de superar estas validaciones se ejecutan:
+Para el visor de logs se mantiene una normalización defensiva del campo `level`.
 
-```text
-lectura
-→ DataValidator
-→ limpieza
-→ subida a S3
-```
-
-Para el visor de logs se incorporó una normalización defensiva del campo `level`.
-
-Si la columna no existe se crea con:
+Si la columna no existe o contiene valores nulos se utiliza:
 
 ```text
 UNKNOWN
 ```
 
-y si contiene valores nulos se reemplazan también por:
-
-```text
-UNKNOWN
-```
-
-antes de construir las opciones del filtro.
+La lectura del visor también se mantiene acotada para evitar cargar indefinidamente un log completo en memoria.
 
 ### Resultado
 
 La carga masiva quedó protegida frente a archivos vacíos o superiores al límite operativo definido por la aplicación.
 
-Se validó además un archivo real de prueba con:
-
-```text
-3 filas
-27 columnas
-```
-
-que completó correctamente:
-
-```text
-validación
-→ limpieza
-→ subida a staging/batch/
-```
-
-El visor de auditoría continuó funcionando correctamente y quedó preparado para tolerar registros donde `level` no exista o tenga valores faltantes.
+El visor de auditoría quedó preparado para tolerar registros con esquemas incompletos y para limitar el volumen de información cargado simultáneamente.
 
 ### Prevención
 
@@ -932,8 +857,189 @@ validación del contenido
 → esquema, tipos, nulos, duplicados, rangos y reglas de negocio
 ```
 
-No debe asumirse que una validación de contenido protege automáticamente contra archivos excesivamente grandes.
+De la misma manera, las herramientas de auditoría deben tolerar registros históricos o externos parcialmente incompletos y evitar lecturas ilimitadas de archivos que pueden crecer de forma continua.
 
-De la misma manera, las herramientas de auditoría deben tolerar registros históricos o externos parcialmente incompletos siempre que puedan representarse de forma segura.
+---
 
-Los valores faltantes de campos descriptivos deben manejarse defensivamente cuando su ausencia no impida interpretar el resto del evento.
+## 2026-08-29 - Lectura incorrecta de CSV desde Amazon S3
+
+### Contexto
+
+Durante la revisión del flujo de carga se analizó:
+
+```text
+src/reactiva/data/load_data.py
+```
+
+### Problema
+
+El objeto devuelto por S3 en:
+
+```python
+response['Body']
+```
+
+se estaba utilizando directamente para construir un DataFrame.
+
+Esto no interpreta correctamente el contenido del archivo CSV.
+
+### Causa
+
+`response['Body']` representa un stream de bytes y no una estructura tabular lista para convertirse directamente mediante `pd.DataFrame()`.
+
+### Solución aplicada
+
+El flujo se corrigió para:
+
+```text
+leer Body
+→ decodificar UTF-8
+→ StringIO
+→ pd.read_csv()
+```
+
+### Resultado
+
+El contenido descargado desde S3 se interpreta correctamente como CSV antes de construir el DataFrame utilizado por el proyecto.
+
+### Prevención
+
+Los objetos obtenidos desde servicios de almacenamiento deben procesarse según el formato real del archivo.
+
+Para un CSV descargado desde S3 se debe leer y decodificar el contenido antes de pasarlo al parser correspondiente.
+
+---
+
+## 2026-08-29 - Identidad de clientes, PENDING y doble ejecución en Streamlit
+
+### Contexto
+
+Durante el review del flujo individual se revisaron la identificación de clientes existentes, la generación de clientes nuevos y el comportamiento frente a reruns o doble ejecución.
+
+### Problema
+
+Se identificaron tres riesgos:
+
+- resolver clientes existentes utilizando silenciosamente la primera fila encontrada;
+- generar un nuevo `PENDING-UUID` ante cada rerun de Streamlit;
+- registrar dos veces una misma operación por doble clic o segunda ejecución.
+
+### Causa
+
+`Customer Full Name` no garantiza por sí solo una identidad única.
+
+Además, Streamlit ejecuta nuevamente el script frente a diferentes interacciones, por lo que los identificadores creados directamente durante cada ejecución pueden cambiar si no se conservan en el estado de sesión.
+
+### Solución aplicada
+
+Para clientes existentes:
+
+```text
+nombre
+→ buscar Customer ID asociados
+→ si hay más de uno, seleccionar Customer ID exacto
+→ recuperar datos del perfil
+→ confirmar email
+```
+
+Los valores históricos de:
+
+```text
+Age
+Gender
+Location
+Customer Email
+```
+
+se obtienen utilizando el valor válido más reciente y se advierten inconsistencias cuando corresponda.
+
+Para clientes nuevos, el:
+
+```text
+PENDING-UUID
+```
+
+permanece estable durante toda la operación.
+
+También se mantiene estable el `Transaction ID` de la operación y se bloquea una segunda ejecución de la misma venta dentro de la sesión.
+
+### Resultado
+
+El flujo deja de resolver identidades ambiguas mediante `.iloc[0]`.
+
+Un mismo cliente nuevo conserva el mismo `PENDING-UUID` durante la operación y un doble submit no debe generar una segunda transacción.
+
+La conversión:
+
+```text
+PENDING-UUID → CUSTXXXXXX
+```
+
+queda fuera de este PR y será responsabilidad de un consolidador nocturno desarrollado en una Issue separada.
+
+### Prevención
+
+Los campos descriptivos no deben reemplazar silenciosamente identificadores únicos.
+
+Los identificadores necesarios durante una operación de Streamlit deben mantenerse en estado de sesión cuando deban sobrevivir a reruns.
+
+Las operaciones de escritura deben diseñarse para tolerar reintentos sin generar duplicados lógicos.
+
+---
+
+## 2026-08-29 - Controles de consistencia e idempotencia en carga masiva
+
+### Contexto
+
+La carga masiva representa actualmente el ingreso manual de ventas provenientes del e-commerce mientras no exista una integración directa mediante API.
+
+### Problema
+
+Una carga podía superar la validación general del DataFrame sin cumplir reglas transaccionales necesarias para ser incorporada a staging.
+
+También existía riesgo de reutilizar el resultado validado de un archivo anterior después de seleccionar otro archivo.
+
+### Causa
+
+Las reglas generales de calidad de datos no sustituyen las reglas específicas del flujo batch.
+
+Además, Streamlit puede conservar información calculada previamente dentro de la sesión.
+
+### Solución aplicada
+
+Antes de permitir una carga se verifica:
+
+- `Transaction ID` presente;
+- `Transaction ID` no vacío;
+- ausencia de `Transaction ID` duplicados dentro del mismo archivo;
+- ausencia de `Transaction ID` ya presentes en el dataset canónico;
+- canal `Online` válido;
+- validación antes de la escritura en S3.
+
+Un archivo idéntico no debe procesarse nuevamente como una nueva carga dentro de la misma operación.
+
+Cuando cambia el archivo cargado, se invalida el `df_clean` correspondiente al archivo anterior y el nuevo archivo debe volver a validarse.
+
+### Resultado
+
+El flujo batch queda condicionado a reglas de integridad transaccional y canal antes de escribir en:
+
+```text
+staging/batch/
+```
+
+La reconciliación global contra todos los objetos existentes en staging no se implementa en este PR.
+
+Esa responsabilidad corresponde al futuro consolidador nocturno.
+
+### Prevención
+
+Toda fuente batch debe validar no solamente estructura y tipos, sino también:
+
+- identidad de transacciones;
+- unicidad;
+- canal de origen;
+- reintentos;
+- relación entre el archivo seleccionado y el resultado validado.
+
+Las responsabilidades del flujo de ingreso y de la consolidación nocturna deben mantenerse separadas.
