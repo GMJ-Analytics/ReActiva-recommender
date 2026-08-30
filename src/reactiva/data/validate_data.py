@@ -23,8 +23,6 @@ from reactiva.data.audit_data import auditar_consistencia_canal
 from reactiva.data.save_results import save_to_local
 
 
-REQUIRED_COLUMNS = ['Customer ID', 'Item Purchased', 'Category', 'Purchase Date']
-
 NUMERIC_VALID_RANGES = {
     'Age': (15, 100),
     'Quantity': (1, None),
@@ -49,7 +47,7 @@ FULL_DEFAULT_STRATEGY = {
     'Age':                     'median',
     'Gender':                  'mode',
     'Location':                'mode',
-    'Online/Offline':          'mode',
+    'Online/Offline':          'drop_row',
     'Online Store':            'mode',
     'Category':                'mode',
     'Item Purchased':          'drop_row',
@@ -68,8 +66,9 @@ FULL_DEFAULT_STRATEGY = {
     'Review Rating':           'median',
     'Return Status':           'mode',
     'Previous Purchases':      'median',
-    'session':                 'drop_row',
 }
+
+REQUIRED_COLUMNS = list(FULL_DEFAULT_STRATEGY)
 
 
 class DataValidator:
@@ -98,6 +97,8 @@ class DataValidator:
             'dtypes': self.df.dtypes.astype(str).to_dict(),
             'duplicate_rows': int(self.df.duplicated().sum()),
             'duplicate_key_rows': self._check_duplicate_keys(),
+            'blank_transaction_ids': self._check_blank_transaction_ids(),
+            'invalid_channels': self._check_invalid_channels(),
             'date_issues': self._check_dates(),
             'negative_or_zero_ids': self._check_id_sanity(),
             'category_cardinality': self._check_cardinality('Category'),
@@ -121,20 +122,44 @@ class DataValidator:
         return (self.df.isnull().sum() / n * 100).round(2).to_dict()
 
     def _check_duplicate_keys(self):
-        """Duplicate transactions using Transaction ID, customer, item and date."""
+        """Duplicate Transaction ID values; kept for report compatibility."""
         if 'Transaction ID' not in self.df.columns:
             return None
 
-        keys = [
-            c for c in
-            ['Transaction ID', 'Customer ID', 'Item Purchased', 'Purchase Date']
-            if c in self.df.columns
-        ]
+        ids = (
+            self.df['Transaction ID']
+            .fillna('')
+            .astype(str)
+            .str.strip()
+        )
+        ids = ids[ids != '']
 
-        if len(keys) < 2:
+        return int(ids.duplicated().sum())
+
+    def _check_blank_transaction_ids(self):
+        if 'Transaction ID' not in self.df.columns:
             return None
 
-        return int(self.df.duplicated(subset=keys).sum())
+        ids = (
+            self.df['Transaction ID']
+            .fillna('')
+            .astype(str)
+            .str.strip()
+        )
+        return int((ids == '').sum())
+
+    def _check_invalid_channels(self):
+        if 'Online/Offline' not in self.df.columns:
+            return None
+
+        channels = (
+            self.df['Online/Offline']
+            .fillna('')
+            .astype(str)
+            .str.strip()
+            .str.casefold()
+        )
+        return int((~channels.isin({'online', 'offline'})).sum())
 
     def _check_dates(self):
         if 'Purchase Date' not in self.df.columns:
@@ -240,9 +265,11 @@ class DataValidator:
             print('  none')
         print(f"\nDuplicate rows (all columns identical): {report['duplicate_rows']}")
         print(
-            f"Duplicate (Transaction ID, Customer ID, Item, Date) rows: "
+            f"Duplicate Transaction ID rows: "
             f"{report['duplicate_key_rows']}"
         )
+        print(f"Blank Transaction ID count: {report['blank_transaction_ids']}")
+        print(f"Invalid channel count: {report['invalid_channels']}")
         print(f"\nDate issues: {report['date_issues']}")
         print(f"Customer ID sanity (invalid/empty count): {report['negative_or_zero_ids']}")
         print(f"\nCategory cardinality: {report['category_cardinality']}")
@@ -274,8 +301,8 @@ class DataValidator:
             'skip'        : leave nulls as-is (explicit opt-out)
 
         normalize_text: if True, removes surrounding whitespace from string
-            values without changing capitalization or internal content.
-            Default True.
+            values and converts blank strings to null without changing
+            capitalization or internal content. Default True.
 
         high_null_threshold: max null % (0-100) a column may have before an
             imputation strategy (mode/mean/median/ffill/constant) is BLOCKED
@@ -287,6 +314,10 @@ class DataValidator:
             those columns are left untouched (nulls remain) and flagged in
             the log so the decision has to be made explicitly.
 
+        dedupe_keys: after exact duplicate removal, Transaction ID must remain
+            unique. Conflicting rows with the same Transaction ID raise
+            ValueError instead of being silently discarded.
+
         Every action taken is appended to self.log for auditability.
         """
         df = self.df_raw.copy()
@@ -295,6 +326,7 @@ class DataValidator:
 
         if normalize_text:
             normalized_values = 0
+            blank_values = 0
 
             for col in df.columns:
                 if (
@@ -314,9 +346,17 @@ class DataValidator:
                         df.loc[string_mask, col] = after
                         normalized_values += changed
 
+                    blank_mask = string_mask & df[col].eq('')
+                    blank_count = int(blank_mask.sum())
+
+                    if blank_count > 0:
+                        df.loc[blank_mask, col] = pd.NA
+                        blank_values += blank_count
+
             self._record(
                 f"Normalized surrounding whitespace in text columns. "
-                f"{normalized_values} value(s) changed."
+                f"{normalized_values} value(s) changed; "
+                f"{blank_values} blank string(s) converted to null."
             )
 
         if parse_dates and 'Purchase Date' in df.columns:
@@ -328,6 +368,20 @@ class DataValidator:
                 f"Parsed 'Purchase Date' to datetime. "
                 f"{newly_unparseable} additional value(s) became NaT (unparseable)."
             )
+
+        for col in NUMERIC_VALID_RANGES:
+            if col not in df.columns:
+                continue
+
+            original = df[col]
+            converted = pd.to_numeric(original, errors='coerce')
+            invalid_count = int((original.notna() & converted.isna()).sum())
+            df[col] = converted
+
+            if invalid_count > 0:
+                self._record(
+                    f"'{col}': {invalid_count} non-numeric value(s) converted to null."
+                )
 
         for col, action in strategy.items():
             if col not in df.columns:
@@ -443,22 +497,35 @@ class DataValidator:
         if dedupe_keys:
             if 'Transaction ID' not in df.columns:
                 self._record(
-                    "Duplicate-key removal skipped: 'Transaction ID' column not found."
+                    "Duplicate-key validation skipped: 'Transaction ID' column not found."
                 )
             else:
-                keys = [
-                    c for c in
-                    ['Transaction ID', 'Customer ID', 'Item Purchased', 'Purchase Date']
-                    if c in df.columns
-                ]
+                ids = (
+                    df['Transaction ID']
+                    .fillna('')
+                    .astype(str)
+                    .str.strip()
+                )
 
-                if len(keys) >= 2:
-                    before = len(df)
-                    df = df.drop_duplicates(subset=keys)
-                    self._record(
-                        f"Dropped {before - len(df)} duplicate "
-                        "(Transaction ID, Customer ID, Item, Date) row(s)."
+                if (ids == '').any():
+                    raise ValueError(
+                        "Transaction ID contains blank values after cleaning."
                     )
+
+                duplicate_mask = ids.duplicated(keep=False)
+
+                if duplicate_mask.any():
+                    duplicate_ids = sorted(
+                        ids[duplicate_mask].unique().tolist()
+                    )
+                    raise ValueError(
+                        "Duplicate Transaction ID values remain after exact "
+                        f"duplicate removal: {duplicate_ids[:20]}"
+                    )
+
+                self._record(
+                    "Transaction ID uniqueness check passed."
+                )
 
         self.df = df
         return df

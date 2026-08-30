@@ -6,7 +6,7 @@ from botocore.exceptions import ClientError
 
 
 def cargar_datos(path_file):
-    try: 
+    try:
         if path_file.endswith('.xlsx'):
             df = pd.read_excel(path_file)
         else:
@@ -15,28 +15,43 @@ def cargar_datos(path_file):
     except FileNotFoundError:
         print(f'please verify the path file, {path_file} does not exist')
 
-def  cargar_datos_as3(df,Key_s3,bucket):
+
+def cargar_datos_as3(df, Key_s3, bucket):
     buffer = StringIO()
-    s3= boto3.client('s3')
+    s3 = boto3.client('s3')
 
-    df.to_csv(buffer, index =False)
-    s3.put_object(
-        Bucket = bucket,
-        Key= Key_s3,
-        Body = buffer.getvalue()
-
+    df.to_csv(
+        buffer,
+        index=False
     )
 
-def descargar_datos_des3(Key_s3,bucket):
+    s3.put_object(
+        Bucket=bucket,
+        Key=Key_s3,
+        Body=buffer.getvalue()
+    )
+
+
+def descargar_datos_des3(Key_s3, bucket):
     s3 = boto3.client('s3')
+
     try:
-       response= s3.get_object(
-            Bucket= bucket,
-            Key= Key_s3
+        response = s3.get_object(
+            Bucket=bucket,
+            Key=Key_s3
         )
-       df = pd.DataFrame(response['Body'])
+
+        contenido = (
+            response['Body']
+            .read()
+            .decode('utf-8')
+        )
+
+        df = pd.read_csv(
+            StringIO(contenido)
+        )
+
     except ClientError:
         df = pd.DataFrame()
+
     return df
-        
-    
