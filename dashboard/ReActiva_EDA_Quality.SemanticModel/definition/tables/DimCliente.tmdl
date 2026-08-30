@@ -1,0 +1,152 @@
+table DimCliente
+	lineageTag: 0aeab6da-fa95-4c6c-8777-425dfc41cc7f
+
+	column 'Customer ID'
+		dataType: string
+		lineageTag: 0d450fe8-b068-4db3-81b6-eee493607eb1
+		summarizeBy: none
+		sourceColumn: Customer ID
+
+		annotation SummarizationSetBy = Automatic
+
+	column first_purchase
+		dataType: dateTime
+		formatString: Long Date
+		lineageTag: 42756b0a-6c65-4eb3-93b6-02b7130a164c
+		summarizeBy: none
+		sourceColumn: first_purchase
+
+		variation Variación
+			isDefault
+			relationship: dff84f79-d073-4ace-a3bc-8c75ee878488
+			defaultHierarchy: LocalDateTable_0c92fb76-2167-47c8-93c5-c66d77755083.'Jerarquía de fechas'
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation UnderlyingDateTimeDataType = Date
+
+	column last_purchase
+		dataType: dateTime
+		formatString: Long Date
+		lineageTag: bea25a53-a97e-4191-b951-2bef96d17e4f
+		summarizeBy: none
+		sourceColumn: last_purchase
+
+		variation Variación
+			isDefault
+			relationship: 192a83bc-81ef-454b-9265-31d289a72a7e
+			defaultHierarchy: LocalDateTable_eb756598-72f1-4024-afef-88041cc1730d.'Jerarquía de fechas'
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation UnderlyingDateTimeDataType = Date
+
+	column age
+		dataType: int64
+		formatString: 0
+		lineageTag: 098aac3a-7054-449f-bd9f-03fa53d9941a
+		summarizeBy: sum
+		sourceColumn: age
+
+		annotation SummarizationSetBy = Automatic
+
+	column age_group
+		dataType: string
+		lineageTag: dbfd48a8-6dcd-4b92-9c76-dd6741223ec1
+		summarizeBy: none
+		sourceColumn: age_group
+
+		annotation SummarizationSetBy = Automatic
+
+	column gender
+		dataType: string
+		lineageTag: 6475ff68-18d2-4149-b3dd-a1a6f0cc57ba
+		summarizeBy: none
+		sourceColumn: gender
+
+		annotation SummarizationSetBy = Automatic
+
+	column location
+		dataType: string
+		lineageTag: 1fac651e-14bb-402f-a179-1d082ab20a13
+		summarizeBy: none
+		sourceColumn: location
+
+		annotation SummarizationSetBy = Automatic
+
+	column subscription_status
+		dataType: string
+		lineageTag: 6fff5c5b-8d40-468e-b9cb-8127ed3f6624
+		summarizeBy: none
+		sourceColumn: subscription_status
+
+		annotation SummarizationSetBy = Automatic
+
+	column preferred_category
+		dataType: string
+		lineageTag: 2323df32-5b44-4306-81b0-d25fda558af3
+		summarizeBy: none
+		sourceColumn: preferred_category
+
+		annotation SummarizationSetBy = Automatic
+
+	column preferred_product
+		dataType: string
+		lineageTag: 31a41b1e-471d-47a4-a364-791c7903de17
+		summarizeBy: none
+		sourceColumn: preferred_product
+
+		annotation SummarizationSetBy = Automatic
+
+	column preferred_brand
+		dataType: string
+		lineageTag: 829d9ccb-54eb-4d7c-838c-81d209bb901c
+		summarizeBy: none
+		sourceColumn: preferred_brand
+
+		annotation SummarizationSetBy = Automatic
+
+	column days_since_last_purchase
+		dataType: int64
+		formatString: 0
+		lineageTag: 0459cf51-dde1-42e0-81a3-f77ff5fcd37c
+		summarizeBy: sum
+		sourceColumn: days_since_last_purchase
+
+		annotation SummarizationSetBy = Automatic
+
+	column inactive_270
+		dataType: boolean
+		formatString: """TRUE"";""TRUE"";""FALSE"""
+		lineageTag: eff191e0-47a1-423b-a7c6-ea47f19e44de
+		summarizeBy: none
+		sourceColumn: inactive_270
+
+		annotation SummarizationSetBy = Automatic
+
+	column activity_status
+		dataType: string
+		lineageTag: 9c63f787-fde0-4bbf-8f09-352c3d3c4a86
+		summarizeBy: none
+		sourceColumn: activity_status
+
+		annotation SummarizationSetBy = Automatic
+
+	partition DimCliente = m
+		mode: import
+		source =
+				let
+				    Origen = Csv.Document(File.Contents(RutaDatosBI & "\bi_customers.csv"), [Delimiter=",", Columns=25, Encoding=65001, QuoteStyle=QuoteStyle.None]),
+				    #"Cambiar tipo" = Table.TransformColumnTypes(Origen,{{"Column1", type text}, {"Column2", type text}, {"Column3", type text}, {"Column4", type text}, {"Column5", type text}, {"Column6", type text}, {"Column7", type text}, {"Column8", type text}, {"Column9", type text}, {"Column10", type text}, {"Column11", type text}, {"Column12", type text}, {"Column13", type text}, {"Column14", type text}, {"Column15", type text}, {"Column16", type text}, {"Column17", type text}, {"Column18", type text}, {"Column19", type text}, {"Column20", type text}, {"Column21", type text}, {"Column22", type text}, {"Column23", type text}, {"Column24", type text}, {"Column25", type text}}),
+				    #"Encabezados promovidos" = Table.PromoteHeaders(#"Cambiar tipo", [PromoteAllScalars=true]),
+				    #"Tipo cambiado" = Table.TransformColumnTypes(#"Encabezados promovidos",{{"Customer ID", type text}, {"transactions", Int64.Type}, {"total_units", Int64.Type}, {"total_spend", Int64.Type}, {"average_ticket", Int64.Type}, {"average_discount", Int64.Type}, {"average_rating", Int64.Type}, {"first_purchase", type date}, {"last_purchase", type date}, {"age", Int64.Type}, {"age_group", type text}, {"gender", type text}, {"location", type text}, {"subscription_status", type text}, {"returned_transactions", Int64.Type}, {"online_transactions", Int64.Type}, {"preferred_category", type text}, {"preferred_product", type text}, {"preferred_brand", type text}, {"days_since_last_purchase", Int64.Type}, {"inactive_270", type logical}, {"activity_status", type text}, {"return_rate_pct", Int64.Type}, {"online_share_pct", Int64.Type}, {"offline_share_pct", Int64.Type}}),
+				    #"Otras columnas quitadas" = Table.SelectColumns(#"Tipo cambiado",{"Customer ID", "first_purchase", "last_purchase", "age", "age_group", "gender", "location", "subscription_status", "preferred_category", "preferred_product", "preferred_brand", "days_since_last_purchase", "inactive_270", "activity_status"}),
+				    #"Valor reemplazado" = Table.ReplaceValue(#"Otras columnas quitadas","Active","Activo",Replacer.ReplaceText,{"activity_status"}),
+				    #"Valor reemplazado1" = Table.ReplaceValue(#"Valor reemplazado","Inactive 270+ days","Inactivo 270+ days",Replacer.ReplaceText,{"activity_status"})
+				in
+				    #"Valor reemplazado1"
+
+	annotation PBI_NavigationStepName = Navegación
+
+	annotation PBI_ResultType = Table
+

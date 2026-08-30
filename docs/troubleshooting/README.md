@@ -405,3 +405,92 @@ app.py -> Streamlit -> puerto 8501
 Una futura implementación de FastAPI deberá disponer de su propio módulo o entrypoint claramente identificado.
 
 La incorporación futura de una API no debe reemplazar accidentalmente el runtime de Streamlit mientras ambos componentes continúen cumpliendo responsabilidades diferentes.
+
+---
+
+## 2026-08-26 - Rutas locales absolutas en Power BI
+
+### Contexto
+
+Durante el desarrollo del dashboard de la Issue #61 se detectó que las consultas del proyecto Power BI almacenaban directamente la ruta absoluta de la computadora utilizada para crearlo.
+
+### Problema
+
+Las seis consultas principales contenían rutas similares a:
+
+`C:\Users\<usuario>\...\ReActiva-recommender\dashboard\data\archivo.csv`
+
+Esto impedía que otro integrante pudiera abrir y actualizar el dashboard desde una ubicación diferente sin modificar individualmente cada consulta.
+
+### Causa
+
+Power BI generó automáticamente referencias absolutas al utilizar archivos CSV locales como origen de datos.
+
+### Solución aplicada
+
+Se creó en Power Query el parámetro:
+
+`RutaDatosBI`
+
+Las seis consultas utilizan ahora ese único parámetro como ruta base:
+
+- `FactTransacciones`
+- `DimFecha`
+- `DimCliente`
+- `DimProducto`
+- `CalidadResumen`
+- `CalidadColumnas`
+
+Cada archivo se resuelve a partir del parámetro, por ejemplo:
+
+`RutaDatosBI & "\bi_transactions.csv"`
+
+### Resultado
+
+La ruta local quedó centralizada en un único punto. Al utilizar el proyecto desde otra computadora solamente es necesario modificar `RutaDatosBI` para que apunte a la carpeta local `dashboard/data`.
+
+### Prevención
+
+Toda nueva fuente local utilizada por Power BI debe depender de un parámetro de ruta y no incorporar directamente rutas absolutas dentro de cada consulta.
+
+---
+
+## 2026-08-26 - Interpretación incorrecta de decimales por configuración regional en Power BI
+
+### Contexto
+
+Durante la construcción del modelo de Power BI de la Issue #61 se importaron tablas CSV generadas por Python.
+
+### Problema
+
+La detección automática de tipos de Power Query interpretó algunos valores con punto decimal utilizando una configuración regional incompatible.
+
+Por ejemplo, valores como:
+
+`6065.5`
+
+podían ser interpretados como:
+
+`60655`
+
+alterando métricas y porcentajes del dashboard.
+
+### Causa
+
+Los CSV utilizan el punto (`.`) como separador decimal, mientras que la configuración regional utilizada por Power BI esperaba otra representación numérica.
+
+### Solución aplicada
+
+En las consultas afectadas se evitó la detección automática de tipos y los campos numéricos necesarios se convirtieron explícitamente utilizando una configuración regional compatible con el formato del CSV.
+
+### Resultado
+
+Los valores decimales y porcentajes quedaron correctamente interpretados en el modelo y las métricas del dashboard recuperaron sus valores esperados.
+
+### Prevención
+
+Al importar CSV generados por Python en Power BI:
+
+- evitar depender únicamente de la detección automática de tipos;
+- validar manualmente métricas decimales después de la importación;
+- utilizar conversión de tipo con configuración regional explícita cuando el archivo utilice punto decimal.

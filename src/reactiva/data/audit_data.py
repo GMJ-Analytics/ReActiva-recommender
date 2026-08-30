@@ -1,5 +1,6 @@
 from pathlib import Path
 import pandas as pd
+from reactiva.config import DATASET_URI
 from reactiva.data.load_data import cargar_datos
 
 # ============================================================
@@ -538,7 +539,7 @@ def guardar_diccionario_datos(diccionario):
 # 10. ORQUESTADOR PRINCIPAL
 # ============================================================
 
-def auditar_dataset():
+def auditar_dataset(path_file):
     """
     Ejecuta todos los controles de auditoria sobre el dataset.
 
@@ -546,7 +547,7 @@ def auditar_dataset():
     originales utilizados por el resto del pipeline.
     """
 
-    df = cargar_datos()
+    df = cargar_datos(path_file)
 
     dimensiones = auditar_dimensiones(df)
     duplicados = auditar_duplicados(df)
@@ -731,7 +732,7 @@ def imprimir_resultados(resultado):
 # ============================================================
 
 if __name__ == "__main__":
-    resultado = auditar_dataset()
+    resultado = auditar_dataset(DATASET_URI)
 
     ruta_diccionario = guardar_diccionario_datos(
         resultado["diccionario_datos"]
