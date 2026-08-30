@@ -1977,4 +1977,315 @@ Transaction Consolidator
                       Amazon S3
 ```
 
-This component separates transaction ingestion from transaction consolidation and provides an auditable mechanism for identifying and removing duplicate records.
+This component separates transaction ingestion from transaction consolidation and provides an auditable mechanism for identifying and removing duplicate records
+# Customer Identity Resolution & Transaction Consolidation
+
+## Overview
+
+Implemented and integrated a customer identity-resolution process into the transaction consolidator to ensure that transactions belonging to the same customer are associated with a persistent `Customer ID`.
+
+The main objective is to prevent customer records from becoming fragmented when the same customer appears in different staging files with a temporary `PENDING-*` customer ID or with slightly different customer information.
+
+The consolidation pipeline now follows this general process:
+
+```text
+Staging Transactions
+        ↓
+Validate transaction structure
+        ↓
+Convert Purchase Date
+        ↓
+Resolve Customer Identity
+        ↓
+Detect Duplicate Transactions
+        ↓
+Remove Duplicates
+        ↓
+Write Consolidated Transactions
+        ↓
+Update Customer Registry
+        ↓
+Write Identity/Duplicate Audit Logs
+```
+
+## Customer Identity Resolution
+
+A persistent customer registry was introduced as a source of truth for previously identified customers.
+
+The registry stores the core information required to identify a customer:
+
+* Customer ID
+* Customer Full Name
+* Customer Email
+* Customer Phone / normalized phone
+* Age
+
+When a transaction arrives with a `PENDING-*` Customer ID, the system attempts to resolve that transaction to an existing customer before creating a new customer ID.
+
+### Identity matching strategy
+
+Identity resolution uses a tiered approach:
+
+1. **Exact email match**
+2. If email does not provide a match, use:
+
+   * Phone number
+   * Full name
+   * Age within the configured tolerance
+3. If neither method produces a match, create a new persistent Customer ID.
+
+The phone number is normalized before comparison so that formatting differences do not prevent a match.
+
+For example:
+
+```text
++91 79794369905
+917974369905
+91-7979-436-9905
+```
+
+can be normalized to the same numeric representation.
+
+## Why Phone + Full Name + Age Are Used Together
+
+Email was initially considered as an identity signal, but email by itself is not sufficiently reliable to guarantee customer continuity.
+
+A customer may provide a different email address during a subsequent purchase. For example, a customer could purchase something and then return one or two hours later using a different email address.
+
+If email were the only identity mechanism, the system could interpret that transaction as belonging to a new customer:
+
+```text
+Purchase 1
+Customer ID → CUST001000
+Email → customer@email.com
+
+        ↓
+
+Purchase 2
+Email → another@email.com
+        ↓
+
+New Customer ID → CUST001001
+```
+
+The same real-world customer would then be represented by two different customer IDs.
+
+This creates **customer identity fragmentation**.
+
+Using:
+
+```text
+Phone + Full Name + Age
+```
+
+provides an additional validation layer that makes it possible to recognize the customer even when the email changes.
+
+The intention is not to treat any individual attribute as sufficient identity proof. The combination provides a stronger identity signal.
+
+## Why Not Use Phone Alone?
+
+Phone number alone can also produce false matches because a phone number may potentially be shared or reused.
+
+Likewise:
+
+* Phone + name can still produce ambiguous matches.
+* Name alone is clearly insufficient.
+* Age alone is insufficient.
+* Email alone can change between transactions.
+
+The selected combination:
+
+```text
+Phone + Full Name + Age
+```
+
+therefore provides a more conservative automatic identity-resolution rule while still allowing returning customers to retain their existing Customer ID.
+
+An age tolerance is also applied because customer demographic information may change or may be recorded slightly differently between transactions.
+
+## Business Cost-Benefit Consideration
+
+There is a trade-off between two possible errors:
+
+### False merge
+
+The system could theoretically merge two different people if they happen to have:
+
+```text
+Same phone
++
+Same full name
++
+Same age
+```
+
+This is considered a relatively rare scenario compared with the more common problem of the same customer appearing with inconsistent information across purchases.
+
+If a false merge occurs, the identity-resolution audit log provides traceability so the decision can be investigated and corrected.
+
+### False split
+
+The opposite situation is creating a new Customer ID for an existing customer.
+
+For example:
+
+```text
+Purchase #1 → CUST001000
+
+Purchase #2 → CUST001001
+```
+
+even though both transactions belong to the same person.
+
+This creates an ongoing business cost:
+
+* Fragmented purchase history
+* Incorrect customer lifetime history
+* Weaker customer profiling
+* Reduced personalization
+* Less reliable recommendations
+* Incorrect purchase-frequency calculations
+* Fragmented loyalty information
+* More duplicate customer records
+* Additional reconciliation work later
+
+Therefore, always creating a new customer ID whenever any customer attribute changes can be more damaging over time than allowing a controlled identity merge based on multiple identity signals.
+
+The chosen approach accepts a small and manageable false-merge risk in order to reduce the recurring and structurally more damaging problem of customer-history fragmentation.
+
+## Auditability
+
+Identity-resolution decisions are recorded in an audit log.
+
+For each resolved pending customer, the audit records information such as:
+
+* Original pending transaction ID
+* Resolved Customer ID
+* Resolution type
+* Matching signals used
+* Resolution timestamp
+
+For example:
+
+```text
+PENDING-XXXX
+        ↓
+CUST001000
+        ↓
+resolution = merged_existing
+        ↓
+match_signals = phone+name+age
+```
+
+This makes automatic identity resolution **traceable rather than silent**.
+
+The system therefore does not simply overwrite customer IDs without an explanation of how the decision was reached.
+
+## Duplicate Detection
+
+Duplicate detection was also restored as part of the consolidation process.
+
+Duplicate transactions are identified using the configured identity fields and purchase date.
+
+Transactions with the same identity characteristics and a purchase-date difference of two seconds or less are treated as duplicates.
+
+The oldest transaction is retained as the anchor transaction.
+
+The duplicate transaction is removed from the consolidated dataset and recorded in the duplicate audit log.
+
+The audit includes information such as:
+
+* Duplicate transaction
+* Transaction that was retained
+* Purchase-date difference
+* Duplicate reason
+* Processing timestamp
+
+## Important Processing Order
+
+Customer identity resolution is intentionally performed **before duplicate detection**.
+
+This is important because a transaction may arrive with a temporary `PENDING-*` Customer ID.
+
+If duplicate detection happened first, two transactions belonging to the same customer could appear to have different identities:
+
+```text
+Transaction A
+Customer ID = PENDING-AAA
+
+Transaction B
+Customer ID = PENDING-BBB
+```
+
+After identity resolution:
+
+```text
+Transaction A
+Customer ID = CUST001000
+
+Transaction B
+Customer ID = CUST001000
+```
+
+The duplicate-detection stage can therefore operate on the resolved customer identity rather than temporary identifiers.
+
+This makes the consolidation process more logically consistent:
+
+```text
+Resolve WHO the customer is
+        ↓
+Determine WHICH transactions are duplicates
+```
+
+rather than attempting to determine duplicates using unresolved customer identities.
+
+## Customer Registry vs. Audit Log
+
+The customer registry and audit logs serve different purposes.
+
+### Customer Registry
+
+The registry answers:
+
+> **Who is this customer?**
+
+It acts as the persistent reference used by future Lambda executions to resolve incoming customer identities.
+
+### Identity Audit Log
+
+The identity audit answers:
+
+> **What decision did the system make when resolving this customer, and why?**
+
+### Duplicate Audit Log
+
+The duplicate audit answers:
+
+> **Which transaction was removed as a duplicate, which transaction was retained, and why?**
+
+This separation keeps the persistent customer identity data distinct from the historical processing logs.
+
+## Result
+
+The consolidation process now provides a persistent customer identity layer while preserving the complete transaction dataset.
+
+The intended result is:
+
+```text
+                    CUSTOMER REGISTRY
+                           │
+                           │
+                    Customer Identity
+                           │
+                           ▼
+STAGING → IDENTITY RESOLUTION → DUPLICATE DETECTION
+                                      │
+                                      ▼
+                           CLEAN TRANSACTIONS
+                                      │
+                                      ▼
+                         CONSOLIDATED DATASET
+```
+
+This approach reduces customer identity fragmentation, preserves customer purchase history, supports downstream personalization/recommendation systems, and maintains auditability for both identity-resolution and duplicate-removal decisions.
+
