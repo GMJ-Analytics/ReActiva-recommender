@@ -1,0 +1,146 @@
+table CalidadResumen
+	lineageTag: f17dff5b-94c5-4513-8bee-343dc7400550
+
+	column total_rows
+		dataType: string
+		lineageTag: 897e4b8e-d503-44d8-9e33-5f4425b6e219
+		summarizeBy: none
+		sourceColumn: total_rows
+
+		annotation SummarizationSetBy = Automatic
+
+	column total_columns
+		dataType: string
+		lineageTag: 18cbbe9f-8a9d-400e-8774-bd4e4a83e9f2
+		summarizeBy: none
+		sourceColumn: total_columns
+
+		annotation SummarizationSetBy = Automatic
+
+	column unique_transactions
+		dataType: string
+		lineageTag: ac86503e-9923-4c4c-81bf-31cad8bc5d5d
+		summarizeBy: none
+		sourceColumn: unique_transactions
+
+		annotation SummarizationSetBy = Automatic
+
+	column unique_customers
+		dataType: string
+		lineageTag: e4133138-8b5a-4774-ad1b-60b4fef9695c
+		summarizeBy: none
+		sourceColumn: unique_customers
+
+		annotation SummarizationSetBy = Automatic
+
+	column unique_products
+		dataType: string
+		lineageTag: 57abf8b4-e917-41ec-88cd-1d1b2bb83524
+		summarizeBy: none
+		sourceColumn: unique_products
+
+		annotation SummarizationSetBy = Automatic
+
+	column unique_categories
+		dataType: string
+		lineageTag: 69927286-1cfa-46e6-b3e2-18bc54a098bc
+		summarizeBy: none
+		sourceColumn: unique_categories
+
+		annotation SummarizationSetBy = Automatic
+
+	column unique_locations
+		dataType: string
+		lineageTag: be7b91dc-30cf-44ac-a0d5-bb87bc4550e6
+		summarizeBy: none
+		sourceColumn: unique_locations
+
+		annotation SummarizationSetBy = Automatic
+
+	column total_null_values
+		dataType: string
+		lineageTag: 45ac2337-036f-41cf-83b5-5010ae26f7a1
+		summarizeBy: none
+		sourceColumn: total_null_values
+
+		annotation SummarizationSetBy = Automatic
+
+	column duplicate_rows
+		dataType: string
+		lineageTag: df03d75a-c8f6-47e5-9f33-cc6fc6ab9f1c
+		summarizeBy: none
+		sourceColumn: duplicate_rows
+
+		annotation SummarizationSetBy = Automatic
+
+	column duplicate_key_rows
+		dataType: string
+		lineageTag: 994392cf-64f7-4d54-9098-547fa8845835
+		summarizeBy: none
+		sourceColumn: duplicate_key_rows
+
+		annotation SummarizationSetBy = Automatic
+
+	column unparseable_dates
+		dataType: string
+		lineageTag: 9e68936b-6e08-4a84-83d9-3acd45366865
+		summarizeBy: none
+		sourceColumn: unparseable_dates
+
+		annotation SummarizationSetBy = Automatic
+
+	column future_dates
+		dataType: string
+		lineageTag: 88ac134b-3d4f-4d71-9764-f356780df377
+		summarizeBy: none
+		sourceColumn: future_dates
+
+		annotation SummarizationSetBy = Automatic
+
+	column missing_required_columns
+		dataType: string
+		lineageTag: 7afc2cdf-f438-4aa2-b137-78872131e9f6
+		summarizeBy: none
+		sourceColumn: missing_required_columns
+
+		annotation SummarizationSetBy = Automatic
+
+	column customers_with_one_purchase
+		dataType: string
+		lineageTag: 092b7698-3f9f-40f4-ba01-1159e32e7abc
+		summarizeBy: none
+		sourceColumn: customers_with_one_purchase
+
+		annotation SummarizationSetBy = Automatic
+
+	column dataset_min_date
+		dataType: string
+		lineageTag: b6cf0194-cfdd-4922-a33c-42699172e31e
+		summarizeBy: none
+		sourceColumn: dataset_min_date
+
+		annotation SummarizationSetBy = Automatic
+
+	column dataset_max_date
+		dataType: string
+		lineageTag: c515d560-37a8-4682-9519-c774c49a367b
+		summarizeBy: none
+		sourceColumn: dataset_max_date
+
+		annotation SummarizationSetBy = Automatic
+
+	partition CalidadResumen = m
+		mode: import
+		source =
+				let
+				    Origen = Csv.Document(File.Contents(RutaDatosBI & "\bi_quality_summary.csv"), [Delimiter=",", Columns=16, Encoding=65001, QuoteStyle=QuoteStyle.None]),
+				    #"Encabezados promovidos" = Table.PromoteHeaders(Origen, [PromoteAllScalars=true]),
+				    #"Tipo cambiado" = Csv.Document(File.Contents(RutaDatosBI & "\bi_quality_summary.csv"), [Delimiter=",", Columns=16, Encoding=65001, QuoteStyle=QuoteStyle.None]),
+				    #"Encabezados promovidos1" = Table.PromoteHeaders(#"Tipo cambiado", [PromoteAllScalars=true])
+				in
+				    #"Encabezados promovidos1"
+
+	annotation PBI_NavigationStepName = Navegación
+
+	annotation PBI_ResultType = Table
+

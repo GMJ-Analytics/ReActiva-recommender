@@ -1,0 +1,250 @@
+table FactTransacciones
+	lineageTag: 6e72a7d7-b1eb-46f0-8afd-a3c7e8bda5bc
+
+	measure 'Total Transacciones' =
+			
+			DISTINCTCOUNT(FactTransacciones[Transaction ID])
+		formatString: #,0
+		lineageTag: 73c0fb4c-d2bf-4d32-ba2d-216c89647448
+
+	measure 'Total Clientes' =
+			
+			DISTINCTCOUNT(FactTransacciones[Customer ID])
+		formatString: #,0
+		lineageTag: d1acd10c-00a7-408a-bd74-528015d3873f
+
+	measure 'Total Productos' =
+			
+			DISTINCTCOUNT(FactTransacciones[Item Purchased])
+		formatString: 0
+		lineageTag: a7f4156f-51bc-4a2a-a61d-00b8c22df1fb
+
+	measure 'Total Ingresos (₹)' =
+			
+			SUM(FactTransacciones[Purchase Amount (₹)])
+		formatString: #,0
+		lineageTag: f651dbf6-da19-4925-b7bd-2f37681a19d4
+
+	measure 'Ticket Promedio (₹)' =
+			
+			DIVIDE(
+			    [Total Ingresos (₹)],
+			    [Total Transacciones]
+			)
+		lineageTag: 944c11df-b98d-47c2-89e8-88ab9dcc3824
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
+
+	measure 'Total Unidades' =
+			
+			SUM(FactTransacciones[Quantity])
+		formatString: 0
+		lineageTag: d8c5e605-da06-4f00-909c-fcb7ea451a8b
+
+	measure 'Calificacion Promedio' =
+			
+			AVERAGE(FactTransacciones[Review Rating])
+		lineageTag: 3e2c913c-9593-4496-b7e1-35af1314da65
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
+
+	measure 'Transacciones Devueltas' =
+			
+			CALCULATE(
+			    [Total Transacciones],
+			    FactTransacciones[Return Status] = "Returned"
+			)
+		formatString: 0
+		lineageTag: 4ee4a4de-d233-4473-8f85-205acca9e666
+
+	measure 'Tasa Devolucion' =
+			
+			DIVIDE(
+			    [Transacciones Devueltas],
+			    [Total Transacciones]
+			)
+		formatString: 0.00\ %;-0.00\ %;0.00\ %
+		lineageTag: faf632fa-8310-4b76-ab80-2218c28f8a1d
+
+	measure 'Descuento Promedio' =
+			
+			AVERAGE(FactTransacciones[Discount (%)])
+		formatString: 0.00
+		lineageTag: 66950446-b4c3-479c-a227-3c1567df7346
+
+	column 'Transaction ID'
+		dataType: string
+		lineageTag: 1a16bfc4-aca4-4e97-a420-826c01347461
+		summarizeBy: none
+		sourceColumn: Transaction ID
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Customer ID'
+		dataType: string
+		lineageTag: ce942e63-4da1-49cd-8cfc-dd667164fb1d
+		summarizeBy: none
+		sourceColumn: Customer ID
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Purchase Date'
+		dataType: dateTime
+		formatString: Long Date
+		lineageTag: 397b59ca-8f8b-4096-9da9-90bafea5e183
+		summarizeBy: none
+		sourceColumn: Purchase Date
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation UnderlyingDateTimeDataType = Date
+
+	column Online/Offline
+		dataType: string
+		lineageTag: 4112dc33-88e7-48df-9f29-55fea0207528
+		summarizeBy: none
+		sourceColumn: Online/Offline
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Online Store'
+		dataType: string
+		lineageTag: 13dc5b54-99f3-4065-9fb3-5b4a7f81631e
+		summarizeBy: none
+		sourceColumn: Online Store
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Item Purchased'
+		dataType: string
+		lineageTag: 6e65db48-dca4-4518-8b5c-062ad18bdc56
+		summarizeBy: none
+		sourceColumn: Item Purchased
+
+		annotation SummarizationSetBy = Automatic
+
+	column Brand
+		dataType: string
+		lineageTag: a99ae507-d24b-4719-ade2-f4df138f9e1d
+		summarizeBy: none
+		sourceColumn: Brand
+
+		annotation SummarizationSetBy = Automatic
+
+	column Color
+		dataType: string
+		lineageTag: df44aa66-6b5a-40d9-b125-6b1b7bece93a
+		summarizeBy: none
+		sourceColumn: Color
+
+		annotation SummarizationSetBy = Automatic
+
+	column Size
+		dataType: string
+		lineageTag: 1959b456-1074-478c-ac92-22b3ee9da8bc
+		summarizeBy: none
+		sourceColumn: Size
+
+		annotation SummarizationSetBy = Automatic
+
+	column Quantity
+		dataType: int64
+		formatString: 0
+		lineageTag: a81ff931-6284-4dfe-b18c-99812ac07198
+		summarizeBy: sum
+		sourceColumn: Quantity
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Purchase Amount (₹)'
+		dataType: int64
+		formatString: 0
+		lineageTag: 3a87917d-be1a-4255-8833-2b9403b73683
+		summarizeBy: sum
+		sourceColumn: Purchase Amount (₹)
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Discount (%)'
+		dataType: int64
+		formatString: 0
+		lineageTag: 5b1b943c-dded-484c-bcab-ee4b923acd8c
+		summarizeBy: sum
+		sourceColumn: Discount (%)
+
+		annotation SummarizationSetBy = Automatic
+
+	column Festival/Sale
+		dataType: string
+		lineageTag: 91462136-a7b5-4edd-92e5-0155b1383a7d
+		summarizeBy: none
+		sourceColumn: Festival/Sale
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Shipping Charge (₹)'
+		dataType: int64
+		formatString: 0
+		lineageTag: 8d6bac09-b98e-4884-aaa8-6a726ed8e6ac
+		summarizeBy: sum
+		sourceColumn: Shipping Charge (₹)
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Delivery Speed'
+		dataType: string
+		lineageTag: 084c186a-f765-433e-a983-f47bcf294ab5
+		summarizeBy: none
+		sourceColumn: Delivery Speed
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Delivery Time (Days)'
+		dataType: int64
+		formatString: 0
+		lineageTag: 4549dfe1-e294-442f-bf9b-ce7e58e62848
+		summarizeBy: sum
+		sourceColumn: Delivery Time (Days)
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Payment Method'
+		dataType: string
+		lineageTag: 22c069da-674b-4326-a2b5-2b9c651c5d98
+		summarizeBy: none
+		sourceColumn: Payment Method
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Review Rating'
+		dataType: int64
+		formatString: 0
+		lineageTag: a7aca641-2707-4414-be9a-aa42ac1f609e
+		summarizeBy: sum
+		sourceColumn: Review Rating
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Return Status'
+		dataType: string
+		lineageTag: 7985f7c7-035d-4089-bfcd-67bce07e837b
+		summarizeBy: none
+		sourceColumn: Return Status
+
+		annotation SummarizationSetBy = Automatic
+
+	partition FactTransacciones = m
+		mode: import
+		source =
+				let
+				    Origen = Csv.Document(File.Contents(RutaDatosBI & "\bi_transactions.csv"), [Delimiter=",", Columns=27, Encoding=65001, QuoteStyle=QuoteStyle.None]),
+				    #"Encabezados promovidos" = Table.PromoteHeaders(Origen, [PromoteAllScalars=true]),
+				    #"Tipo cambiado" = Table.TransformColumnTypes(#"Encabezados promovidos",{{"Transaction ID", type text}, {"Customer ID", type text}, {"Purchase Date", type date}, {"Age", Int64.Type}, {"Gender", type text}, {"Location", type text}, {"Online/Offline", type text}, {"Online Store", type text}, {"Category", type text}, {"Item Purchased", type text}, {"Brand", type text}, {"Color", type text}, {"Size", type text}, {"Quantity", Int64.Type}, {"Purchase Amount (₹)", Int64.Type}, {"Discount (%)", Int64.Type}, {"Festival/Sale", type text}, {"Shipping Charge (₹)", Int64.Type}, {"Delivery Speed", type text}, {"Delivery Time (Days)", Int64.Type}, {"Subscription Status", type text}, {"Payment Method", type text}, {"Review Rating", Int64.Type}, {"Return Status", type text}, {"Previous Purchases", Int64.Type}, {"season", type text}, {"age_group", type text}}),
+				    #"Columnas quitadas" = Table.RemoveColumns(#"Tipo cambiado",{"season", "Age", "Gender", "Location", "Category", "Subscription Status", "age_group", "Previous Purchases"})
+				in
+				    #"Columnas quitadas"
+
+	annotation PBI_NavigationStepName = Navegación
+
+	annotation PBI_ResultType = Table
+
