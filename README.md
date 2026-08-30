@@ -1665,3 +1665,316 @@ COPY .streamlit ./.streamlit
 Esto mantiene dentro del contenedor el mismo límite de carga de archivos de **20 MB** utilizado durante la ejecución local.
 
 La construcción debe realizarse utilizando la raíz del repositorio como contexto, de manera que el Dockerfile pueda acceder a las dependencias y archivos de configuración requeridos.
+
+## Transaction Consolidator — AWS Lambda
+
+The project includes an AWS Lambda component responsible for consolidating transaction files uploaded to the staging area in Amazon S3.
+
+The Lambda source code is located in:
+
+```text
+artifacts/AwsLambda/lambda.py
+```
+
+The consolidator is designed to process CSV files stored under the configured staging prefix, combine them into a single consolidated transaction file, identify duplicate transactions, and generate an audit log for the records removed during deduplication.
+
+### Consolidator flow
+
+The implemented process follows this general flow:
+
+```text
+Streamlit / transaction source
+          │
+          ▼
+       Amazon S3
+          │
+          ▼
+   Staging transaction CSVs
+          │
+          ▼
+   AWS Lambda Consolidator
+          │
+          ├── Read CSV files
+          │
+          ├── Validate schema
+          │
+          ├── Concatenate transactions
+          │
+          ├── Convert Purchase Date
+          │
+          ├── Detect duplicates
+          │
+          ├── Remove duplicates
+          │
+          ├── Write consolidated CSV
+          │
+          ├── Write duplicate audit
+          │
+          └── Remove processed staging files
+          │
+          ▼
+Consolidated transaction dataset
+```
+
+### Main Lambda functions
+
+The consolidator is organized around two main functions.
+
+#### `read_csv_from_s3()`
+
+```python
+read_csv_from_s3(bucket, key)
+```
+
+This function reads an individual CSV object directly from Amazon S3.
+
+The object is retrieved using `boto3`, decoded into text, and loaded into a pandas DataFrame.
+
+This allows the Lambda to process the staging files without requiring them to be permanently downloaded to local storage.
+
+#### `find_duplicates()`
+
+```python
+find_duplicates(df)
+```
+
+This function identifies duplicate transactions.
+
+Transactions are grouped using the configured identity columns:
+
+```text
+Customer ID
+session
+Age
+Gender
+Location
+Online/Offline
+Category
+Item Purchased
+Brand
+Color
+Size
+Quantity
+Purchase Amount (₹)
+Discount (%)
+Festival/Sale
+Subscription Status
+Payment Method
+Online Store
+Shipping Charge (₹)
+Delivery Speed
+Delivery Time (Days)
+```
+
+Within each group, transactions are ordered by `Purchase Date`.
+
+The consolidator uses a duplicate threshold of:
+
+```text
+2 seconds
+```
+
+When two otherwise identical transactions occur within two seconds, the oldest transaction is retained and the subsequent transaction is classified as a duplicate.
+
+The function also creates audit information for every duplicate, including:
+
+* duplicate transaction;
+* reason for duplication;
+* transaction ID that was retained;
+* purchase date of the retained transaction;
+* time difference between transactions;
+* processing timestamp.
+
+### `lambda_handler()`
+
+```python
+lambda_handler(event, context)
+```
+
+This is the Lambda entry point.
+
+The function performs the complete consolidation workflow:
+
+1. Lists CSV files in the staging S3 prefix.
+2. Reads each CSV file.
+3. Validates that all expected columns are present.
+4. Concatenates the individual DataFrames.
+5. Converts `Purchase Date` to a datetime value.
+6. Validates that purchase dates are valid.
+7. Calls `find_duplicates()`.
+8. Removes the detected duplicate transactions.
+9. Writes the consolidated dataset to the configured output key.
+10. Generates a duplicate audit CSV when duplicates are detected.
+11. Removes the successfully processed staging CSV files.
+12. Returns a summary containing the number of files processed and rows before and after deduplication.
+
+### S3 organization
+
+The Lambda reads transaction files from the staging area:
+
+```text
+staging/individual/transactions_clean_2026/08/
+```
+
+The consolidated output is written to:
+
+```text
+csv_transactions_consolidated/consolidated_transactions.csv
+```
+
+Duplicate records are preserved separately through an audit file under:
+
+```text
+duplicate_audit/2026/08/
+```
+
+The staging files are removed only after the consolidation process has successfully completed. The purpose is to avoid keeping individual transaction files after they have been incorporated into the consolidated dataset.
+
+The staging prefix itself is not deleted; only the processed CSV objects are removed.
+
+### Dockerized Lambda
+
+The consolidator is packaged as a Docker container using the AWS Lambda Python base image.
+
+The Dockerfile is located in:
+
+```text
+artifacts/AwsLambda/Dockerfile
+```
+
+The image uses:
+
+```dockerfile
+FROM public.ecr.aws/lambda/python:3.12
+```
+
+This base image already provides:
+
+* Python 3.12;
+* the AWS Lambda runtime;
+* the Lambda container execution environment;
+* AWS SDK components such as `boto3`.
+
+Therefore, `boto3` does not need to be installed separately for this implementation.
+
+The additional dependency required by the consolidator is pandas:
+
+```dockerfile
+RUN pip install --no-cache-dir pandas
+```
+
+The Lambda source code is copied into the Lambda task root:
+
+```dockerfile
+COPY lambda.py lambda.py
+```
+
+The Lambda entry point is configured using:
+
+```dockerfile
+CMD ["lambda.lambda_handler"]
+```
+
+Unlike the Streamlit Docker image, the Lambda image does not require `EXPOSE` or a Streamlit server port. The AWS Lambda runtime handles invocation of the function.
+
+The resulting image contains the Lambda runtime, Python, pandas and its dependencies, and the consolidator source code.
+
+### Building the Lambda image
+
+The Docker image is built for the Lambda-compatible Linux AMD64 architecture.
+
+The build uses:
+
+```powershell
+docker buildx build `
+  --platform linux/amd64 `
+  --provenance=false `
+  -t consolidator:latest `
+  --load `
+  .
+```
+
+The `--platform linux/amd64` option ensures that the image is built for the required Linux architecture.
+
+The `--provenance=false` option prevents Docker from attaching provenance metadata that can result in an unsupported image manifest for AWS Lambda.
+
+The `--load` option loads the resulting image into the local Docker image store.
+
+### Amazon ECR
+
+After building the image, it is tagged with the Amazon ECR repository URI:
+
+```powershell
+docker tag consolidator:latest \
+856554457924.dkr.ecr.us-east-1.amazonaws.com/consolidator:latest
+```
+
+Docker is authenticated against Amazon ECR using:
+
+```powershell
+aws ecr get-login-password --region us-east-1 |
+docker login --username AWS --password-stdin \
+856554457924.dkr.ecr.us-east-1.amazonaws.com
+```
+
+The image can then be pushed to ECR:
+
+```powershell
+docker push \
+856554457924.dkr.ecr.us-east-1.amazonaws.com/consolidator:latest
+```
+
+The ECR image is subsequently used as the container image for the AWS Lambda function.
+
+### Local Lambda testing
+
+The Lambda container can also be executed locally using Docker.
+
+For example:
+
+```powershell
+docker run --rm -p 9000:8080 consolidator
+```
+
+The Lambda Runtime Interface provided by the AWS Lambda base image listens internally on port `8080`. Port `9000` is used on the local machine to access the container during testing.
+
+A local invocation can be sent using:
+
+```powershell
+Invoke-RestMethod -Method Post `
+  -Uri "http://localhost:9000/2015-03-31/functions/function/invocations" `
+  -Body '{}'
+```
+
+This allows the Lambda function to be tested locally before deploying the container image to AWS.
+
+### Current architecture
+
+The consolidator adds a serverless processing component to the existing S3-based architecture:
+
+```text
+Streamlit
+    │
+    │ transaction CSV
+    ▼
+Amazon S3
+    │
+    │ staging files
+    ▼
+AWS Lambda
+Transaction Consolidator
+    │
+    ├── pandas
+    ├── validation
+    ├── concatenation
+    ├── deduplication
+    └── audit
+    │
+    ├───────────────► Consolidated CSV
+    │                 Amazon S3
+    │
+    └───────────────► Duplicate Audit
+                      Amazon S3
+```
+
+This component separates transaction ingestion from transaction consolidation and provides an auditable mechanism for identifying and removing duplicate records.
