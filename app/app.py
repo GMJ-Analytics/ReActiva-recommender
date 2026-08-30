@@ -522,6 +522,14 @@ def email_valido(email: str) -> bool:
     return bool(re.fullmatch(patron, email.strip()))
 
 
+def phone_valido(phone: str) -> bool:
+    """Valida que el telefono tenga entre 8 y 15 digitos (formato E.164 laxo)."""
+    if not phone:
+        return False
+    patron = r'^\+?[0-9]{8,15}$'
+    return bool(re.fullmatch(patron, phone.strip()))
+
+
 def normalizar_item_existente(df: pd.DataFrame, item: str):
     """Devuelve el nombre canonico del item si existe en el historico."""
     if (
@@ -798,6 +806,10 @@ with tabs[0]:
                 datos_cliente,
                 'Customer Email'
             )
+            phone, phone_inconsistente = obtener_valor_perfil(
+                datos_cliente,
+                'Customer Phone'
+            )
 
             st.text_input(
                 label='Edad',
@@ -819,6 +831,11 @@ with tabs[0]:
                 value='' if email is None else str(email),
                 disabled=True
             )
+            st.text_input(
+                label='Telefono registrado',
+                value='' if phone is None else str(phone),
+                disabled=True
+            )
 
             email_confirmacion = st.text_input(
                 'Confirmar email del cliente',
@@ -833,6 +850,7 @@ with tabs[0]:
                     ('Genero', gender_inconsistente),
                     ('Ciudad', location_inconsistente),
                     ('Email', email_inconsistente),
+                    ('Telefono', phone_inconsistente),
                 ]
                 if inconsistente
             ]
@@ -896,6 +914,11 @@ with tabs[0]:
             email = st.text_input(
                 label='Email',
                 placeholder='client@example.com'
+            )
+
+            phone = st.text_input(
+                label='Telefono',
+                placeholder='+91XXXXXXXXXX'
             )
 
             email_confirmacion = None
@@ -1037,6 +1060,7 @@ with tabs[0]:
         if modo == 'Perfil nuevo (sin historial)':
             customer_name = str(customer_name).strip()
             email = str(email).strip()
+            phone = str(phone).strip()
 
             if not customer_name:
                 st.error('❌ Ingrese el nombre completo del cliente.')
@@ -1044,6 +1068,13 @@ with tabs[0]:
 
             if not email_valido(email):
                 st.error('❌ Ingrese un email valido antes de registrar la venta.')
+                st.stop()
+
+            if not phone_valido(phone):
+                st.error(
+                    '❌ Ingrese un telefono valido (8 a 15 digitos, '
+                    'puede incluir codigo de pais) antes de registrar la venta.'
+                )
                 st.stop()
 
         else:
@@ -1097,6 +1128,9 @@ with tabs[0]:
 
             'Customer Email':
                 email,
+
+            'Customer Phone':
+                phone,
 
             'Purchase Date':
                 str(purchase_date),
