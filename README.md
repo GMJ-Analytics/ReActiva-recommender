@@ -1354,54 +1354,6 @@ The `--provenance=false` option prevents Docker from attaching provenance metada
 
 The `--load` option loads the resulting image into the local Docker image store.
 
-### Amazon ECR
-
-After building the image, it is tagged with the Amazon ECR repository URI:
-
-```powershell
-docker tag consolidator:latest \
-856554457924.dkr.ecr.us-east-1.amazonaws.com/consolidator:latest
-```
-
-Docker is authenticated against Amazon ECR using:
-
-```powershell
-aws ecr get-login-password --region us-east-1 |
-docker login --username AWS --password-stdin \
-856554457924.dkr.ecr.us-east-1.amazonaws.com
-```
-
-The image can then be pushed to ECR:
-
-```powershell
-docker push \
-856554457924.dkr.ecr.us-east-1.amazonaws.com/consolidator:latest
-```
-
-The ECR image is subsequently used as the container image for the AWS Lambda function.
-
-### Local Lambda testing
-
-The Lambda container can also be executed locally using Docker.
-
-For example:
-
-```powershell
-docker run --rm -p 9000:8080 consolidator
-```
-
-The Lambda Runtime Interface provided by the AWS Lambda base image listens internally on port `8080`. Port `9000` is used on the local machine to access the container during testing.
-
-A local invocation can be sent using:
-
-```powershell
-Invoke-RestMethod -Method Post `
-  -Uri "http://localhost:9000/2015-03-31/functions/function/invocations" `
-  -Body '{}'
-```
-
-This allows the Lambda function to be tested locally before deploying the container image to AWS.
-
 ### Current architecture
 
 The consolidator adds a serverless processing component to the existing S3-based architecture:
@@ -1429,6 +1381,3 @@ Transaction Consolidator
     │
     └───────────────► Duplicate Audit
                       Amazon S3
-```
-
-This component separates transaction ingestion from transaction consolidation and provides an auditable mechanism for identifying and removing duplicate records.
