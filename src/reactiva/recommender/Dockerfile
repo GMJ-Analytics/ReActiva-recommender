@@ -6,9 +6,7 @@ COPY requirements.txt .
 
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY app/app.py ./app.py
+COPY src/reactiva/recommender/recommender.py ./recommender.py
 COPY src/reactiva ./reactiva
 
-EXPOSE 8501
-
-CMD ["streamlit", "run", "app.py", "--server.address=0.0.0.0", "--server.port=8501"]
+CMD ["python", "recommender.py"]

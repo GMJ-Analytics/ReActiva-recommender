@@ -22,6 +22,14 @@ API_KEY = os.getenv("API_KEY")
 USUARIO_ADMIN = os.getenv('USUARIO_ADMIN')
 PASSWORD_ADMIN = os.getenv('PASSWORD_ADMIN')
 
+#LOGS
+
+S3_PREDICTIONSLOG= os.getenv('S3_PREDICTIONSLOG')
+if os.getenv("AWS_LAMBDA_FUNCTION_NAME"):
+    LAMBDA_LOG = "/tmp"
+else:
+    LAMBDA_LOG = "predictions_log"
+
 
 # Validamos las variables obligatorias para trabajar con el dataset.
 if not DATASET_URI:
