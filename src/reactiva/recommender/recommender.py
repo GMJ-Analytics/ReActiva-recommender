@@ -2,12 +2,14 @@ import pandas as pd
 import boto3
 from botocore.exceptions import ClientError
 from io import StringIO
-from reactiva.config import S3_BUCKET,API_KEY,S3_PREDICTIONS_KEY
-from reactiva.data.load_data import cargar_datos_as3,descargar_datos_des3
+from reactiva.config import S3_BUCKET,API_KEY,S3_PREDICTIONS_KEY,MATRIX_UIR,LAMBDA_LOG,S3_PREDICTIONSLOG,DATASET_URI
+from reactiva.data.load_data import cargar_datos_as3,descargar_datos_des3,cargar_log_as3
 from reactiva.features.build_features import build_customer_features
-import logging
+from reactiva.data.save_results import generate_run_id
+from reactiva.data.validate_data import clean_and_save_dataset
+from datetime import datetime
+from reactiva.utils.logger import log_event,setup_logger
 from sklearn.ensemble import GradientBoostingClassifier
-from reactiva.config import MATRIX_UIR
 from reactiva.features.build_features import (add_season, season_from_month)
 from reactiva.features.context import (recommend_contextual_popularity)
 from pathlib import Path
@@ -22,31 +24,8 @@ _similarity_matrix = None
 
 #se crea la carpeta de logs si no existe para evitar errores
 #al importar el recomendador desde Streamlit, Docker o notebooks
-LOG_DIR = Path('logs')
-LOG_DIR.mkdir(parents=True, exist_ok=True)
 
-logging.basicConfig(
-    filename=LOG_DIR / 'app.logs',
-    level=logging.INFO,
-    format=' %(asctime)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
-
-def _load_similarity_matrix():
-    """
-    Load the item-similarity matrix only when it is required.
-
-    The matrix is cached after the first load so importing this
-    module does not trigger unnecessary I/O.
-    """
-
-    global _similarity_matrix
-
-    if _similarity_matrix is None:
-        _similarity_matrix = pd.read_csv(MATRIX_UIR)
-
-    return _similarity_matrix
-
+logger = setup_logger('model_predict_log', LAMBDA_LOG)
 
 # ============================================================
 # GRADIENT BOOSTING RECOMMENDER FOR INACTIVE CUSTOMERS
@@ -54,12 +33,14 @@ def _load_similarity_matrix():
 
 
 def recommend_user_based_inactive_customers(
-    df,
+    df =DATASET_URI,
     k=5,
     inactivity_days=270,
     top_n=5,
 ):
     """
+
+    
     Generate recommendations for inactive customers using Gradient Boosting.
 
     The function name is intentionally preserved for compatibility with the
@@ -75,7 +56,13 @@ def recommend_user_based_inactive_customers(
     not used by the classifier.
     """
 
-    data = df.copy()
+    raw = df.copy()
+
+
+    data = clean_and_save_dataset(raw)
+
+
+
     data["Purchase Date"] = pd.to_datetime(data["Purchase Date"])
 
     cutoff_date = (
@@ -199,11 +186,51 @@ def recommend_user_based_inactive_customers(
     new_df = pd.DataFrame(results)
     existing_df = descargar_datos_des3(S3_PREDICTIONS_KEY, S3_BUCKET)
     df_final = pd.concat([existing_df, new_df], ignore_index=True)
+    #enviando el log de predicciones a s3
     cargar_datos_as3(df_final, S3_PREDICTIONS_KEY, S3_BUCKET)
 
-    logger.info("GBoost recommender completed predictions")
+    log_event(
+    logger,
+    f"GBoost recommender completed predictions: {len(results)} customers, "
+    f"{sum(len(r['Recommendations']) for r in results)} recommendations",
+    run_id =generate_run_id()
+    )
+    #enviar el log de metadata a s3#
+    log_file = (
+    Path(LAMBDA_LOG)
+    / f"reactiva_{datetime.now().strftime('%Y-%m-%d')}.log"
+    )
 
+    if log_file.exists():
+        with open(log_file, "rb") as f:
+            log_data = f.read()
+
+    if log_file.exists():
+        cargar__as3(
+            log_data,
+            S3_PREDICTIONSLOG,
+            S3_BUCKET
+        )
+    else:
+        logger.info("Log file does not exist in this environment")
     return pd.DataFrame(results)
+
+
+
+def _load_similarity_matrix():
+    """
+    Load the item-similarity matrix only when it is required.
+
+    The matrix is cached after the first load so importing this
+    module does not trigger unnecessary I/O.
+    """
+
+    global _similarity_matrix
+
+    if _similarity_matrix is None:
+        _similarity_matrix = pd.read_csv(MATRIX_UIR)
+
+    return _similarity_matrix
 
 
 

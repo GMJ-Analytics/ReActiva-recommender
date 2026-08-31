@@ -1906,7 +1906,7 @@ After building the image, it is tagged with the Amazon ECR repository URI:
 
 ```powershell
 docker tag consolidator:latest \
-856554457924.dkr.ecr.us-east-1.amazonaws.com/consolidator:latest
+xxxxxxxxxxxx.dkr.ecr.us-east-1.amazonaws.com/consolidator:latest
 ```
 
 Docker is authenticated against Amazon ECR using:
@@ -1914,14 +1914,13 @@ Docker is authenticated against Amazon ECR using:
 ```powershell
 aws ecr get-login-password --region us-east-1 |
 docker login --username AWS --password-stdin \
-856554457924.dkr.ecr.us-east-1.amazonaws.com
-```
+xxxxxxxxxxxx.dkr.ecr.us-east-1.amazonaws.com
 
 The image can then be pushed to ECR:
 
 ```powershell
 docker push \
-856554457924.dkr.ecr.us-east-1.amazonaws.com/consolidator:latest
+xxxxxxxxxxxx.dkr.ecr.us-east-1.amazonaws.com/consolidator:latest
 ```
 
 The ECR image is subsequently used as the container image for the AWS Lambda function.
