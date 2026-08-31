@@ -20,6 +20,10 @@ from reactiva.recommender.recommender import (
 )
 from reactiva.data.validate_data import FULL_DEFAULT_STRATEGY, DataValidator
 from reactiva.features.build_features import add_season, season_from_date
+from reactiva.campaigns.coupon_service import (
+    redeem_coupon_from_s3,
+    validate_coupon_from_s3,
+)
 
 load_dotenv()
 logger = setup_logger(name='reactiva.app.streamlit')
@@ -107,6 +111,28 @@ MAX_LOG_PREVIEW_MB = 5
 MAX_LOG_PREVIEW_BYTES = MAX_LOG_PREVIEW_MB * 1024 * 1024
 MAX_LOG_DOWNLOAD_MB = 20
 MAX_LOG_DOWNLOAD_BYTES = MAX_LOG_DOWNLOAD_MB * 1024 * 1024
+
+
+MENSAJES_ERROR_CUPON = {
+    'CAMPAIGN_NOT_AVAILABLE': (
+        'No hay una campaña activa disponible para validar el cupón.'
+    ),
+    'EMPTY_COUPON': 'Ingrese un código de cupón válido.',
+    'COUPON_NOT_FOUND': 'El código de cupón informado no existe.',
+    'CUSTOMER_MISMATCH': (
+        'El cupón no corresponde al Customer ID seleccionado.'
+    ),
+    'COUPON_NOT_ACTIVE': (
+        'El cupón ya fue utilizado o no se encuentra activo.'
+    ),
+    'WRONG_CAMPAIGN_MONTH': (
+        'El cupón no corresponde al mes de esta compra.'
+    ),
+    'PRODUCT_NOT_ELIGIBLE': (
+        'El producto comprado no forma parte de los productos '
+        'recomendados para este cupón.'
+    ),
+}
 
 
 #funciones para la estructura de la pagina:
@@ -647,6 +673,14 @@ def generate_pending_customer_id() -> str:
     return f'PENDING-{uuid4()}'
 
 
+def mensaje_error_cupon(reason: str) -> str:
+    """Traduce el motivo tecnico de validacion a un mensaje para el operador."""
+    return MENSAJES_ERROR_CUPON.get(
+        reason,
+        'El cupón no pudo validarse.'
+    )
+
+
 #armado de la pagina:
 st.set_page_config(page_title='ReActiva Recommender', layout='wide', page_icon='🛍️')
 
@@ -976,6 +1010,18 @@ with tabs[0]:
         )
 
 
+        coupon_code = st.text_input(
+            'Código de cupón (opcional)',
+            placeholder='Ej.: ABC123',
+            help=(
+                'Ingrese el cupón de reactivación presentado por el cliente. '
+                'ReActiva valida el cliente, el mes y el producto recomendado; '
+                'no calcula el importe de la venta.'
+            ),
+            key='coupon_code_input',
+        ).strip()
+
+
     if online_offline == CANAL_ONLINE:
 
         campos_visibles = CAMPOS_OPERATIVOS
@@ -1047,6 +1093,7 @@ with tabs[0]:
         if st.button('🆕 Nueva operacion'):
             st.session_state.pop('current_transaction_id', None)
             st.session_state.pop('current_pending_customer_id', None)
+            st.session_state.pop('coupon_code_input', None)
             st.session_state['transaction_registered'] = False
             st.rerun()
 
@@ -1115,6 +1162,59 @@ with tabs[0]:
                 st.error('❌ Ingrese un item valido antes de registrar la venta.')
                 st.stop()
             item_purchased = str(item_purchased).strip()
+
+
+        #el cupon es opcional y pertenece al subsistema de campañas.
+        #Streamlit valida el beneficio, pero no calcula importes ni descuentos.
+        coupon_validation = None
+
+        if coupon_code:
+            try:
+                coupon_validation = validate_coupon_from_s3(
+                    bucket=S3_BUCKET,
+                    coupon_code=coupon_code,
+                    customer_id=str(customer_id),
+                    item_purchased=item_purchased,
+                    reference_date=purchase_date,
+                )
+            except Exception as error:
+                st.error(
+                    '❌ No se pudo consultar la campaña activa para validar '
+                    'el cupón. Reintente o comuníquese con soporte.'
+                )
+                log_event(
+                    logger,
+                    'Fallo tecnico al validar cupon',
+                    level=40,
+                    customer_id=str(customer_id),
+                    transaction_id=transaction_id,
+                    error=str(error),
+                )
+                st.stop()
+
+            if not coupon_validation['valid']:
+                motivo_cupon = coupon_validation.get('reason')
+
+                st.error(
+                    '❌ Cupón rechazado: '
+                    + mensaje_error_cupon(motivo_cupon)
+                )
+                log_event(
+                    logger,
+                    'Cupon rechazado',
+                    level=30,
+                    customer_id=str(customer_id),
+                    transaction_id=transaction_id,
+                    coupon_code=coupon_code,
+                    motivo=motivo_cupon,
+                )
+                st.stop()
+
+            st.success(
+                '🎟️ Cupón válido: '
+                f'{coupon_validation["discount_percent"]}% de descuento '
+                'para el producto registrado.'
+            )
 
         record = {
             'Transaction ID':
@@ -1300,6 +1400,82 @@ with tabs[0]:
                 'Reintentar o comunicarse con el soporte.'
             )
 
+        #el cupon se consume solo despues de confirmar que la venta
+        #quedo registrada o que la misma transaccion ya existia en S3.
+        transaction_confirmed = bool(creado or s3_key)
+
+        if coupon_code and coupon_validation and transaction_confirmed:
+            coupon_redemption = None
+
+            try:
+                coupon_redemption = redeem_coupon_from_s3(
+                    bucket=S3_BUCKET,
+                    coupon_code=coupon_code,
+                    customer_id=str(customer_id),
+                    item_purchased=item_purchased,
+                    reference_date=purchase_date,
+                    transaction_id=transaction_id,
+                    redeemed_at=pd.Timestamp.now(
+                        tz='Asia/Kolkata'
+                    ).isoformat(),
+                )
+            except Exception as error:
+                #la venta ya fue registrada. Se habilita el reintento
+                #con el mismo Transaction ID para no duplicar la venta.
+                st.session_state['transaction_registered'] = False
+                st.error(
+                    '❌ La venta quedó registrada, pero no se pudo '
+                    'confirmar el consumo del cupón. Reintente la misma '
+                    'operación; la transacción no se duplicará.'
+                )
+                log_event(
+                    logger,
+                    'Fallo tecnico al consumir cupon',
+                    level=40,
+                    customer_id=str(customer_id),
+                    transaction_id=transaction_id,
+                    coupon_code=coupon_code,
+                    error=str(error),
+                )
+
+            if coupon_redemption is not None:
+                if coupon_redemption.get('redeemed'):
+                    if coupon_redemption.get('already_redeemed'):
+                        st.info(
+                            '🎟️ El cupón ya estaba asociado a esta misma '
+                            'transacción. No se generó un consumo duplicado.'
+                        )
+                    else:
+                        st.success(
+                            '🎟️ Cupón registrado como utilizado en esta venta.'
+                        )
+
+                    log_event(
+                        logger,
+                        'Cupon consumido',
+                        customer_id=str(customer_id),
+                        transaction_id=transaction_id,
+                        coupon_code=coupon_redemption.get('coupon_code'),
+                        idempotente=bool(
+                            coupon_redemption.get('already_redeemed')
+                        ),
+                    )
+                else:
+                    motivo_cupon = coupon_redemption.get('reason')
+                    st.error(
+                        '❌ La venta fue registrada, pero el cupón no pudo '
+                        'marcarse como utilizado: '
+                        + mensaje_error_cupon(motivo_cupon)
+                    )
+                    log_event(
+                        logger,
+                        'Cupon no consumido luego de registrar venta',
+                        level=40,
+                        customer_id=str(customer_id),
+                        transaction_id=transaction_id,
+                        coupon_code=coupon_code,
+                        motivo=motivo_cupon,
+                    )
 
         st.markdown(
             '---'

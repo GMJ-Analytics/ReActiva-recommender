@@ -58,6 +58,8 @@ def recommend_user_based_inactive_customers(
     k=5,
     inactivity_days=270,
     top_n=5,
+    persist_predictions=True,
+    reference_date=None,
 ):
     """
     Generate recommendations for inactive customers using Gradient Boosting.
@@ -73,13 +75,30 @@ def recommend_user_based_inactive_customers(
 
     top_n is retained for backward compatibility with existing callers but is
     not used by the classifier.
+
+    persist_predictions keeps the existing S3 persistence behavior enabled by
+    default. It can be disabled by callers that only need the returned DataFrame.
+
+    reference_date allows monthly processes to calculate inactivity relative to
+    the campaign execution date. If omitted, the latest Purchase Date in the
+    supplied DataFrame is used, preserving the previous behavior.
     """
 
     data = df.copy()
     data["Purchase Date"] = pd.to_datetime(data["Purchase Date"])
 
+    if reference_date is None:
+        reference_date = data["Purchase Date"].max()
+    else:
+        reference_date = pd.Timestamp(reference_date)
+
+    # Use only information available up to the selected reference date.
+    data = data[
+        data["Purchase Date"] <= reference_date
+    ].copy()
+
     cutoff_date = (
-        data["Purchase Date"].max()
+        reference_date
         - pd.Timedelta(days=inactivity_days)
     )
 
@@ -101,7 +120,9 @@ def recommend_user_based_inactive_customers(
     inactive_customers = sorted(train_customers - recent_customers)
 
     if df_train.empty or df_recent.empty or not inactive_customers:
-        logger.info("GBoost recommender skipped: insufficient train/recent data or no inactive customers")
+        logger.info(
+            "GBoost recommender skipped: insufficient train/recent data or no inactive customers"
+        )
         return pd.DataFrame()
 
     features_train = build_customer_features(df_train)
@@ -147,7 +168,9 @@ def recommend_user_based_inactive_customers(
                 index=churn_features.index,
             )
     else:
-        logger.warning("GBoost recommender could not train: fewer than two target categories")
+        logger.warning(
+            "GBoost recommender could not train: fewer than two target categories"
+        )
 
     # Current candidate pool: most popular recent items within each category.
     item_pop_by_cat_recent = (
@@ -168,7 +191,10 @@ def recommend_user_based_inactive_customers(
     results = []
 
     for customer_id in inactive_customers:
-        predicted_category = pred_category_churn.get(customer_id, None)
+        predicted_category = pred_category_churn.get(
+            customer_id,
+            None
+        )
 
         if predicted_category is not None:
             recommendation = (
@@ -195,13 +221,32 @@ def recommend_user_based_inactive_customers(
             }
         )
 
-    # Keep the existing prediction persistence and logging flow unchanged.
+    # Keep the existing prediction persistence flow enabled by default.
     new_df = pd.DataFrame(results)
-    existing_df = descargar_datos_des3(S3_PREDICTIONS_KEY, S3_BUCKET)
-    df_final = pd.concat([existing_df, new_df], ignore_index=True)
-    cargar_datos_as3(df_final, S3_PREDICTIONS_KEY, S3_BUCKET)
 
-    logger.info("GBoost recommender completed predictions")
+    if persist_predictions:
+        existing_df = descargar_datos_des3(
+            S3_PREDICTIONS_KEY,
+            S3_BUCKET
+        )
+
+        df_final = pd.concat(
+            [
+                existing_df,
+                new_df
+            ],
+            ignore_index=True
+        )
+
+        cargar_datos_as3(
+            df_final,
+            S3_PREDICTIONS_KEY,
+            S3_BUCKET
+        )
+
+    logger.info(
+        "GBoost recommender completed predictions"
+    )
 
     return pd.DataFrame(results)
 
