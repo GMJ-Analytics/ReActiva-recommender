@@ -3,7 +3,7 @@ import boto3
 from botocore.exceptions import ClientError
 from io import StringIO
 from reactiva.config import S3_BUCKET,API_KEY,S3_PREDICTIONS_KEY,MATRIX_UIR,LAMBDA_LOG,S3_PREDICTIONSLOG,DATASET_URI
-from reactiva.data.load_data import cargar_datos_as3,descargar_datos_des3,cargar_log_as3
+from reactiva.data.load_data import cargar_datos_as3,descargar_datos_des3,cargar_log_as3,cargar_datos
 from reactiva.features.build_features import build_customer_features
 from reactiva.data.save_results import generate_run_id
 from reactiva.data.validate_data import clean_and_save_dataset
@@ -55,6 +55,7 @@ def recommend_user_based_inactive_customers(
     top_n is retained for backward compatibility with existing callers but is
     not used by the classifier.
     """
+    df = cargar_datos(DATASET_URI)
 
     raw = df.copy()
 
@@ -206,7 +207,7 @@ def recommend_user_based_inactive_customers(
             log_data = f.read()
 
     if log_file.exists():
-        cargar__as3(
+        cargar_log_as3(
             log_data,
             S3_PREDICTIONSLOG,
             S3_BUCKET
