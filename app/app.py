@@ -1069,7 +1069,7 @@ with tabs[0]:
 
         #se rellenan los campos que no se muestran
         #en una venta offline para conservar
-        #las 27 columnas del dataset
+        #las 28 columnas del dataset
         if online_offline == CANAL_OFFLINE:
 
             operativos.update(

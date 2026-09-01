@@ -236,7 +236,7 @@ def process_campaign_send_run(
 
     Flow:
         1. Load campaign_active.csv.
-        2. Load historical + consolidated transactions.
+        2. Load the accumulated canonical transaction dataset.
         3. Identify campaign rows due now.
         4. Recheck customer inactivity before every send/retry.
         5. Send through SES when still eligible.

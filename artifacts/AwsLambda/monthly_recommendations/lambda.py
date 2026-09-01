@@ -57,9 +57,7 @@ def lambda_handler(event, context):
     Monthly ReActiva recommendation job.
 
     Flow:
-        historical transactions
-            +
-        consolidated transactions
+        accumulated canonical transactions
             ->
         one Gradient Boosting training execution
             ->

@@ -1,4 +1,5 @@
 import pandas as pd
+import pytest
 from pandas.testing import assert_frame_equal
 
 from reactiva.data.validate_data import DataValidator, FULL_DEFAULT_STRATEGY
@@ -8,6 +9,7 @@ def test_current_schema_strategy():
     """La estrategia debe contemplar el esquema actual del dataset."""
     assert FULL_DEFAULT_STRATEGY["Customer Full Name"] == "skip"
     assert FULL_DEFAULT_STRATEGY["Customer Email"] == "skip"
+    assert FULL_DEFAULT_STRATEGY["Customer Phone"] == "skip"
     assert "Frequency of Purchases" not in FULL_DEFAULT_STRATEGY
 
 
@@ -50,8 +52,8 @@ def test_different_transaction_ids_are_not_duplicates():
 
 def test_same_complete_transaction_key_is_duplicate():
     """
-    Si coinciden Transaction ID, Customer ID, Item Purchased y Purchase Date,
-    la segunda fila debe ser considerada duplicada por clave.
+    Si dos filas conservan el mismo Transaction ID, el reporte debe
+    identificar el duplicado y la limpieza debe rechazar el conflicto.
     """
     df = pd.DataFrame(
         [
@@ -79,10 +81,14 @@ def test_same_complete_transaction_key_is_duplicate():
     validator = DataValidator(df)
 
     report = validator.run_checks()
-    clean_df = validator.clean(strategy=FULL_DEFAULT_STRATEGY)
 
     assert report["duplicate_key_rows"] == 1
-    assert len(clean_df) == 1
+
+    with pytest.raises(
+        ValueError,
+        match="Duplicate Transaction ID values remain",
+    ):
+        validator.clean(strategy=FULL_DEFAULT_STRATEGY)
 
 
 def test_missing_transaction_id_does_not_use_old_dedupe_rule():
@@ -267,10 +273,10 @@ def test_numeric_range_validation_detects_invalid_values():
     assert_frame_equal(validator.df, df)
 
 
-def test_clean_and_save_dataset_writes_reproducible_csv(tmp_path):
+def test_clean_and_save_dataset_returns_reproducible_dataframe():
     """
-    La preparación debe poder limpiar y guardar el dataset mediante una
-    función reutilizable, produciendo la misma salida para el mismo input.
+    La preparación debe poder limpiar el dataset mediante una función
+    reutilizable, produciendo la misma salida para el mismo input.
     """
     from reactiva.data.validate_data import clean_and_save_dataset
 
@@ -288,24 +294,15 @@ def test_clean_and_save_dataset_writes_reproducible_csv(tmp_path):
         ]
     )
 
-    output_path = tmp_path / "customer_shopping_behavior_clean.csv"
+    clean_1 = clean_and_save_dataset(df)
+    clean_2 = clean_and_save_dataset(df)
 
-    clean_1 = clean_and_save_dataset(df, output_path)
-    first_content = output_path.read_text(encoding="utf-8")
-
-    clean_2 = clean_and_save_dataset(df, output_path)
-    second_content = output_path.read_text(encoding="utf-8")
-
-    assert output_path.exists()
     assert_frame_equal(clean_1, clean_2)
-    assert first_content == second_content
 
-    saved_df = pd.read_csv(output_path)
-
-    assert len(saved_df) == 1
-    assert saved_df.iloc[0]["Transaction ID"] == "TXN001"
-    assert saved_df.iloc[0]["Customer ID"] == "CUST001"
-    assert saved_df.iloc[0]["Customer Full Name"] == "Ana Perez"
-    assert saved_df.iloc[0]["Customer Email"] == "ana.perez@example.com"
-    assert saved_df.iloc[0]["Item Purchased"] == "Kurta"
-    assert saved_df.iloc[0]["Category"] == "Clothing"
+    assert len(clean_1) == 1
+    assert clean_1.iloc[0]["Transaction ID"] == "TXN001"
+    assert clean_1.iloc[0]["Customer ID"] == "CUST001"
+    assert clean_1.iloc[0]["Customer Full Name"] == "Ana Perez"
+    assert clean_1.iloc[0]["Customer Email"] == "ana.perez@example.com"
+    assert clean_1.iloc[0]["Item Purchased"] == "Kurta"
+    assert clean_1.iloc[0]["Category"] == "Clothing"

@@ -31,11 +31,6 @@ logger = logging.getLogger(__name__)
 # CONFIGURATION
 # ============================================================
 
-CONSOLIDATED_TRANSACTIONS_KEY = (
-    "csv_transactions_consolidated/"
-    "consolidated_transactions.csv"
-)
-
 MONTHLY_RECOMMENDATION_PREFIX = (
     "recommender/monthly"
 )
@@ -111,18 +106,25 @@ def build_monthly_recommendation_key(
 # DATA SOURCES
 # ============================================================
 
-def load_historical_transactions(
+def load_canonical_transactions(
     dataset_uri: str = DATASET_URI,
 ) -> pd.DataFrame:
     """
-    Loads the historical dataset configured for ReActiva.
+    Loads the accumulated canonical ReActiva transaction dataset.
+
+    The consolidation Lambda already incorporates new transactions
+    into this canonical source and resolves duplicate Transaction ID
+    values before overwriting it.
+
+    Campaign services therefore consume this single source of truth
+    and must not concatenate a separate consolidated dataset.
     """
     if not dataset_uri:
         raise ValueError(
             "dataset_uri is required"
         )
 
-    historical_df = pd.read_csv(
+    canonical_df = pd.read_csv(
         dataset_uri
     )
 
@@ -136,155 +138,30 @@ def load_historical_transactions(
 
     missing_columns = (
         required_columns
-        - set(historical_df.columns)
+        - set(canonical_df.columns)
     )
 
     if missing_columns:
         raise ValueError(
-            "Historical dataset is missing required columns: "
+            "Canonical dataset is missing required columns: "
             f"{sorted(missing_columns)}"
         )
 
-    historical_df["Purchase Date"] = (
+    canonical_df["Purchase Date"] = (
         pd.to_datetime(
-            historical_df["Purchase Date"],
+            canonical_df["Purchase Date"],
             errors="coerce",
         )
     )
 
-    if historical_df[
+    if canonical_df[
         "Purchase Date"
     ].isna().any():
         raise ValueError(
-            "Historical dataset contains invalid Purchase Date values"
+            "Canonical dataset contains invalid Purchase Date values"
         )
 
-    return historical_df
-
-
-def load_consolidated_transactions(
-    bucket: str,
-    s3_client=None,
-) -> pd.DataFrame:
-    """
-    Loads the transactions produced by the consolidation Lambda.
-
-    The consolidated file may legitimately be empty during a first run.
-    """
-    return read_csv_from_s3(
-        bucket=bucket,
-        key=CONSOLIDATED_TRANSACTIONS_KEY,
-        s3_client=s3_client,
-    )
-
-
-def build_operational_transactions_view(
-    historical_df: pd.DataFrame,
-    consolidated_df: pd.DataFrame | None,
-) -> pd.DataFrame:
-    """
-    Combines historical and newly consolidated transactions.
-
-    The historical dataset remains untouched in S3. This function creates
-    only an in-memory operational view for recommendation/campaign logic.
-
-    Transaction ID is used to prevent the same purchase from appearing
-    twice if it is present in both sources.
-    """
-    if historical_df is None or historical_df.empty:
-        raise ValueError(
-            "Historical dataset cannot be empty"
-        )
-
-    historical = historical_df.copy()
-
-    historical["Purchase Date"] = (
-        pd.to_datetime(
-            historical["Purchase Date"],
-            errors="coerce",
-        )
-    )
-
-    if (
-        consolidated_df is None
-        or consolidated_df.empty
-    ):
-        combined = historical.copy()
-
-    else:
-        consolidated = consolidated_df.copy()
-
-        historical_columns = list(
-            historical.columns
-        )
-
-        missing_in_consolidated = [
-            column
-            for column in historical_columns
-            if column not in consolidated.columns
-        ]
-
-        extra_in_consolidated = [
-            column
-            for column in consolidated.columns
-            if column not in historical.columns
-        ]
-
-        if (
-            missing_in_consolidated
-            or extra_in_consolidated
-        ):
-            raise ValueError(
-                "Historical and consolidated schemas do not match. "
-                f"Missing in consolidated: {missing_in_consolidated}. "
-                f"Extra in consolidated: {extra_in_consolidated}."
-            )
-
-        consolidated = consolidated[
-            historical_columns
-        ].copy()
-
-        consolidated["Purchase Date"] = (
-            pd.to_datetime(
-                consolidated["Purchase Date"],
-                errors="coerce",
-            )
-        )
-
-        if consolidated[
-            "Purchase Date"
-        ].isna().any():
-            raise ValueError(
-                "Consolidated transactions contain invalid "
-                "Purchase Date values"
-            )
-
-        combined = pd.concat(
-            [
-                historical,
-                consolidated,
-            ],
-            ignore_index=True,
-        )
-
-    if "Transaction ID" in combined.columns:
-        combined = (
-            combined
-            .drop_duplicates(
-                subset=["Transaction ID"],
-                keep="last",
-            )
-        )
-
-    combined = (
-        combined
-        .sort_values(
-            "Purchase Date"
-        )
-        .reset_index(drop=True)
-    )
-
-    return combined
+    return canonical_df
 
 
 def load_operational_transactions(
@@ -293,25 +170,15 @@ def load_operational_transactions(
     s3_client=None,
 ) -> pd.DataFrame:
     """
-    Convenience wrapper that loads both sources and builds
-    the complete operational transaction view.
+    Loads the complete operational transaction view from the
+    accumulated canonical ReActiva dataset.
+
+    `bucket` and `s3_client` remain in the public signature for
+    compatibility with existing campaign callers and tests, but
+    transaction history is now obtained exclusively from DATASET_URI.
     """
-    historical_df = (
-        load_historical_transactions(
-            dataset_uri=dataset_uri
-        )
-    )
-
-    consolidated_df = (
-        load_consolidated_transactions(
-            bucket=bucket,
-            s3_client=s3_client,
-        )
-    )
-
-    return build_operational_transactions_view(
-        historical_df=historical_df,
-        consolidated_df=consolidated_df,
+    return load_canonical_transactions(
+        dataset_uri=dataset_uri
     )
 
 

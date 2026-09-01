@@ -64,9 +64,10 @@ def recommend_user_based_inactive_customers(
     the campaign execution date. If omitted, the latest Purchase Date in the
     supplied DataFrame is used, preserving the previous behavior.
     """
-    df = cargar_datos(DATASET_URI)
-
-    raw = df.copy()
+    if isinstance(df, pd.DataFrame):
+        raw = df.copy()
+    else:
+        raw = cargar_datos(df).copy()
 
 
     data = clean_and_save_dataset(raw)

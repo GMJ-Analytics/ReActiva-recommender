@@ -426,7 +426,7 @@ Actualmente se contemplan controles relacionados con:
 
 - validez del canal.
 
-El esquema canónico vigente contiene **27 columnas**.
+El esquema canónico vigente contiene **28 columnas**.
 
 Respecto de la estructura anterior:
 
@@ -443,6 +443,8 @@ fue eliminada, mientras que se incorporaron:
 Customer Full Name
 
 Customer Email
+
+Customer Phone
 
 ```
 
@@ -2505,7 +2507,7 @@ Entre sus responsabilidades se encuentran:
 7. resolver la identidad de clientes temporales;
 8. detectar duplicados;
 9. eliminar las operaciones clasificadas como duplicadas;
-10. escribir el dataset consolidado;
+10. escribir el dataset canónico acumulado;
 11. actualizar el registro de clientes;
 12. generar auditorías de identidad y duplicados;
 13. eliminar los archivos de staging procesados únicamente después de completar correctamente las escrituras;
@@ -2513,14 +2515,14 @@ Entre sus responsabilidades se encuentran:
 
 ### Organización en S3
 
-El consolidador trabaja con objetos de staging y mantiene salidas operativas en prefijos separados.
+El consolidador trabaja con objetos de staging y mantiene el dataset canónico acumulado junto con salidas operativas en prefijos separados.
 
 Entre las rutas utilizadas por la arquitectura se encuentran:
 
 ```text
 staging/individual/
 staging/batch/
-csv_transactions_consolidated/consolidated_transactions.csv
+customer_shopping_behavior-clean.csv
 customer_registry/
 duplicate_audit/
 identity_merge_audit/

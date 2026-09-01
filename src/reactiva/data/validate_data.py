@@ -34,7 +34,7 @@ NUMERIC_VALID_RANGES = {
     'Previous Purchases': (0, None),
 }
 
-# Default strategy covering every column in the 27-column schema.
+# Default strategy covering every column in the 28-column schema.
 # Identifiers / fields needed for modeling logic -> drop_row (can't recover these).
 # Categorical descriptive fields -> mode (safe, low-stakes to impute).
 # Numeric fields -> median (robust to outliers vs. mean).
@@ -43,6 +43,7 @@ FULL_DEFAULT_STRATEGY = {
     'Customer ID':             'drop_row',
     'Customer Full Name':      'skip',
     'Customer Email':          'skip',
+    'Customer Phone':          'skip',
     'Purchase Date':           'drop_row',
     'Age':                     'median',
     'Gender':                  'mode',

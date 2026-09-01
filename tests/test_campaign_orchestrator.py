@@ -8,9 +8,9 @@ from reactiva.campaigns.orchestrator import (
     TOP_RECOMMENDATIONS,
     MONTHLY_RECOMMENDATION_REQUIRED_COLUMNS,
     build_monthly_recommendation_key,
-    build_operational_transactions_view,
     create_campaign_from_monthly_recommendations,
     generate_monthly_recommendations,
+    load_canonical_transactions,
     load_monthly_recommendations,
     normalize_reference_date,
     validate_monthly_recommendations,
@@ -22,9 +22,9 @@ from reactiva.campaigns.orchestrator import (
 # ============================================================
 
 
-def build_historical_dataframe():
+def build_canonical_dataframe():
     """
-    Creates a minimal historical transaction dataset.
+    Creates a minimal canonical transaction dataset.
     """
     return pd.DataFrame(
         [
@@ -46,16 +46,6 @@ def build_historical_dataframe():
                 "Customer Full Name": "Cliente Dos",
                 "Customer Email": "dos@example.com",
             },
-        ]
-    )
-
-
-def build_consolidated_dataframe():
-    """
-    Creates transactions using the same schema as the historical source.
-    """
-    return pd.DataFrame(
-        [
             {
                 "Transaction ID": "TX-003",
                 "Customer ID": "CUST-003",
@@ -64,7 +54,7 @@ def build_consolidated_dataframe():
                 "Item Purchased": "Backpack",
                 "Customer Full Name": "Cliente Tres",
                 "Customer Email": "tres@example.com",
-            }
+            },
         ]
     )
 
@@ -153,38 +143,50 @@ class TestMonthlyReferenceDate(
 
 
 # ============================================================
-# OPERATIONAL TRANSACTION VIEW
+# CANONICAL TRANSACTION DATASET
 # ============================================================
 
 
-class TestOperationalTransactions(
+class TestCanonicalTransactions(
     unittest.TestCase
 ):
 
-    def test_historical_and_consolidated_are_combined(self):
-        historical = (
-            build_historical_dataframe()
+    def test_canonical_dataset_is_loaded_and_dates_are_parsed(self):
+        canonical = (
+            build_canonical_dataframe()
         )
 
-        consolidated = (
-            build_consolidated_dataframe()
+        with patch(
+            "reactiva.campaigns.orchestrator."
+            "pd.read_csv",
+            return_value=
+                canonical.copy(),
+        ) as read_mock:
+            result = (
+                load_canonical_transactions(
+                    dataset_uri=
+                        "fake-dataset.csv"
+                )
+            )
+
+        read_mock.assert_called_once_with(
+            "fake-dataset.csv"
         )
 
-        combined = (
-            build_operational_transactions_view(
-                historical_df=historical,
-                consolidated_df=consolidated,
+        self.assertEqual(
+            len(result),
+            3,
+        )
+
+        self.assertTrue(
+            pd.api.types.is_datetime64_any_dtype(
+                result["Purchase Date"]
             )
         )
 
         self.assertEqual(
-            len(combined),
-            3,
-        )
-
-        self.assertEqual(
             set(
-                combined["Transaction ID"]
+                result["Transaction ID"]
             ),
             {
                 "TX-001",
@@ -193,106 +195,60 @@ class TestOperationalTransactions(
             },
         )
 
-    def test_duplicate_transaction_id_keeps_consolidated_version(self):
-        historical = (
-            build_historical_dataframe()
-        )
-
-        consolidated = pd.DataFrame(
-            [
-                {
-                    "Transaction ID": "TX-001",
-                    "Customer ID": "CUST-001",
-                    "Purchase Date": "2026-08-30",
-                    "Category": "Clothing",
-                    "Item Purchased": "Jacket",
-                    "Customer Full Name": "Cliente Uno",
-                    "Customer Email": "uno@example.com",
-                }
-            ]
-        )
-
-        combined = (
-            build_operational_transactions_view(
-                historical_df=historical,
-                consolidated_df=consolidated,
-            )
-        )
-
-        tx_001 = (
-            combined[
-                combined["Transaction ID"]
-                == "TX-001"
-            ]
-            .iloc[0]
-        )
-
-        self.assertEqual(
-            len(
-                combined[
-                    combined["Transaction ID"]
-                    == "TX-001"
-                ]
-            ),
-            1,
-        )
-
-        self.assertEqual(
-            tx_001["Item Purchased"],
-            "Jacket",
-        )
-
-        self.assertEqual(
-            tx_001["Purchase Date"],
-            pd.Timestamp("2026-08-30"),
-        )
-
-    def test_empty_consolidated_keeps_historical_data(self):
-        historical = (
-            build_historical_dataframe()
-        )
-
-        combined = (
-            build_operational_transactions_view(
-                historical_df=historical,
-                consolidated_df=pd.DataFrame(),
-            )
-        )
-
-        self.assertEqual(
-            len(combined),
-            len(historical),
-        )
-
-        self.assertEqual(
-            set(
-                combined["Transaction ID"]
-            ),
-            set(
-                historical["Transaction ID"]
-            ),
-        )
-
-    def test_schema_difference_is_rejected(self):
-        historical = (
-            build_historical_dataframe()
-        )
-
-        consolidated = (
-            build_consolidated_dataframe()
+    def test_missing_required_column_is_rejected(self):
+        canonical = (
+            build_canonical_dataframe()
             .drop(
                 columns=[
-                    "Customer Email"
+                    "Item Purchased"
                 ]
             )
         )
 
+        with patch(
+            "reactiva.campaigns.orchestrator."
+            "pd.read_csv",
+            return_value=
+                canonical,
+        ):
+            with self.assertRaises(
+                ValueError
+            ):
+                load_canonical_transactions(
+                    dataset_uri=
+                        "fake-dataset.csv"
+                )
+
+    def test_invalid_purchase_date_is_rejected(self):
+        canonical = (
+            build_canonical_dataframe()
+        )
+
+        canonical.loc[
+            2,
+            "Purchase Date",
+        ] = "not-a-date"
+
+        with patch(
+            "reactiva.campaigns.orchestrator."
+            "pd.read_csv",
+            return_value=
+                canonical,
+        ):
+            with self.assertRaises(
+                ValueError
+            ):
+                load_canonical_transactions(
+                    dataset_uri=
+                        "fake-dataset.csv"
+                )
+
+    def test_dataset_uri_is_required(self):
         with self.assertRaises(
             ValueError
         ):
-            build_operational_transactions_view(
-                historical_df=historical,
-                consolidated_df=consolidated,
+            load_canonical_transactions(
+                dataset_uri=""
             )
 
 
@@ -359,12 +315,8 @@ class TestMonthlyRecommendationGeneration(
 ):
 
     def test_gboost_is_called_with_monthly_business_parameters(self):
-        operational_df = pd.concat(
-            [
-                build_historical_dataframe(),
-                build_consolidated_dataframe(),
-            ],
-            ignore_index=True,
+        operational_df = (
+            build_canonical_dataframe()
         )
 
         recommendations_df = (
@@ -504,7 +456,7 @@ class TestMonthlyRecommendationGeneration(
 
     def test_empty_gboost_result_aborts_monthly_recommendations(self):
         operational_df = (
-            build_historical_dataframe()
+            build_canonical_dataframe()
         )
 
         with (
