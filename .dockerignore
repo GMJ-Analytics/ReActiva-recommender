@@ -40,8 +40,6 @@ artifacts/*
 artifacts/AwsLambda/*
 
 # Allow only the ReActiva campaign Lambdas
-!artifacts/AwsLambda/monthly_recommendations/
-!artifacts/AwsLambda/monthly_recommendations/**
 !artifacts/AwsLambda/monthly_campaign/
 !artifacts/AwsLambda/monthly_campaign/**
 !artifacts/AwsLambda/campaign_sender/
