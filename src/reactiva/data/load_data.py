@@ -35,7 +35,7 @@ def cargar_datos_as3(df, Key_s3, bucket):
 def cargar_log_as3(log, Key_s3, bucket):
     s3 = boto3.client('s3')
 
-  
+
 
     s3.put_object(
         Bucket=bucket,

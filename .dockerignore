@@ -31,7 +31,23 @@ __pycache__/
 *.log
 
 # Local generated artifacts
-artifacts/
+artifacts/*
+
+# Allow traversal only to the AWS Lambda directory
+!artifacts/AwsLambda/
+
+# Keep all existing AWS Lambda artifacts ignored by default
+artifacts/AwsLambda/*
+
+# Allow only the ReActiva campaign Lambdas
+!artifacts/AwsLambda/monthly_recommendations/
+!artifacts/AwsLambda/monthly_recommendations/**
+!artifacts/AwsLambda/monthly_campaign/
+!artifacts/AwsLambda/monthly_campaign/**
+!artifacts/AwsLambda/campaign_sender/
+!artifacts/AwsLambda/campaign_sender/**
+!artifacts/AwsLambda/unsubscribe/
+!artifacts/AwsLambda/unsubscribe/**
 
 # Operating system files
 .DS_Store
