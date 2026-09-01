@@ -540,7 +540,6 @@ class DataValidator:
 
 def clean_and_save_dataset(
     df: pd.DataFrame,
-    output_path,
     strategy=None,
 ) -> pd.DataFrame:
     """
@@ -554,12 +553,6 @@ def clean_and_save_dataset(
     validator = DataValidator(df)
     clean_df = validator.clean(strategy=strategy)
 
-    output_path = Path(output_path)
-    save_to_local(
-        clean_df,
-        output_path,
-        is_dataframe=True,
-    )
 
     return clean_df
 

@@ -2579,6 +2579,30 @@ Después de construir la imagen, esta puede etiquetarse con la URI del repositor
 
 El despliegue de imágenes requiere permisos sobre ECR y Lambda. Estos permisos no están disponibles para todos los usuarios del proyecto debido a las Permissions Boundaries configuradas en la cuenta AWS.
 
+La imagen puede etiquetarse para el repositorio ECR correspondiente con:
+
+```powershell
+docker tag consolidator:latest `
+xxxxxxxxxxxx.dkr.ecr.us-east-1.amazonaws.com/consolidator:latest
+```
+
+Luego se realiza la autenticación contra Amazon ECR:
+
+```powershell
+aws ecr get-login-password --region us-east-1 |
+docker login --username AWS --password-stdin `
+xxxxxxxxxxxx.dkr.ecr.us-east-1.amazonaws.com
+```
+
+Y finalmente se publica la imagen:
+
+```powershell
+docker push `
+xxxxxxxxxxxx.dkr.ecr.us-east-1.amazonaws.com/consolidator:latest
+```
+
+La imagen publicada en ECR puede utilizarse posteriormente como imagen de contenedor de la función AWS Lambda.
+
 Por ese motivo, las operaciones de despliegue deben ser ejecutadas por el integrante autorizado y nunca deben implicar la publicación de credenciales o secretos en el repositorio.
 
 ### Prueba local de la Lambda

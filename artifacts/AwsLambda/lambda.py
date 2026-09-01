@@ -20,7 +20,7 @@ s3 = boto3.client("s3")
 BUCKET = "rawdatafp"
 
 STAGING_PREFIX = "staging/individual"
-OUTPUT_KEY = "csv_transactions_consolidated/consolidated_transactions.csv"
+OUTPUT_KEY = "customer_shopping_behavior-clean.csv"
 AUDIT_PREFIX = "duplicate_audit/2026/08/"
 
 # New: customer identity registry (source of truth for resolved customers)
@@ -81,6 +81,12 @@ CUSTOMER_REGISTRY_COLUMNS = [
 # ============================================================
 # HELPERS
 # ============================================================
+
+def normalize_name(value):
+    if pd.isna(value):
+        return None
+    return str(value).strip().casefold()
+
 
 def read_csv_from_s3(bucket, key):
     response = s3.get_object(Bucket=bucket, Key=key)
@@ -151,9 +157,11 @@ def next_customer_id(registry):
 def resolve_pending_customers(df, registry):
     """
     For every row with a PENDING-<uuid> Customer ID:
-      Tier 1 - exact email match against the registry      -> reuse ID
-      Tier 2 - phone + full name + age match (age tolerance) -> reuse ID
-      No match                                             -> assign new ID
+      Resolve using phone + full name + age match (age tolerance) -> reuse ID
+      No match                                                    -> assign new ID
+
+    Email is NOT used as a matching signal -- it fails whenever the
+    same person uses a different email, so it isn't trusted here.
 
     Returns:
       df       - with Customer ID values resolved in place
@@ -166,6 +174,11 @@ def resolve_pending_customers(df, registry):
         "Customer Phone", pd.Series(dtype=str, index=df.index)
     ).apply(normalize_phone)
 
+    # normalize the name in place, written straight into
+    # Customer Full Name -- no new column.
+    df["Customer Full Name"] = df["Customer Full Name"].apply(normalize_name)
+    registry["Customer Full Name"] = registry["Customer Full Name"].apply(normalize_name)
+
     next_id_counter = next_customer_id(registry)
     audit_records = []
 
@@ -175,23 +188,11 @@ def resolve_pending_customers(df, registry):
 
         row = df.loc[index]
         matched_id = None
-        match_signals = None
 
         # ------------------------------------------------
-        # Tier 1: email match
+        # Resolution: phone + full name + age
         # ------------------------------------------------
-        email_matches = registry[
-            registry["Customer Email"] == row["Customer Email"]
-        ]
-
-        if not email_matches.empty:
-            matched_id = email_matches.iloc[0]["Customer ID"]
-            match_signals = "email"
-
-        # ------------------------------------------------
-        # Tier 2: phone + full name + age
-        # ------------------------------------------------
-        if matched_id is None and row["normalized_phone"]:
+        if row["normalized_phone"]:
 
             candidates = registry[
                 (registry["normalized_phone"] == row["normalized_phone"])
@@ -204,7 +205,6 @@ def resolve_pending_customers(df, registry):
 
             if not candidates.empty:
                 matched_id = candidates.iloc[0]["Customer ID"]
-                match_signals = "phone+name+age"
 
         # ------------------------------------------------
         # Resolve or create
@@ -217,7 +217,7 @@ def resolve_pending_customers(df, registry):
                 "pending_transaction_id": row["Transaction ID"],
                 "resolved_customer_id": matched_id,
                 "resolution": "merged_existing",
-                "match_signals": match_signals,
+                "match_signals": "phone+name+age",
                 "resolved_at": datetime.now(timezone.utc).isoformat(),
             })
 
@@ -232,6 +232,7 @@ def resolve_pending_customers(df, registry):
                 "Customer ID": new_id,
                 "Customer Full Name": row["Customer Full Name"],
                 "Customer Email": row["Customer Email"],
+                "Customer Phone": row["Customer Phone"],
                 "normalized_phone": row["normalized_phone"],
                 "Age": row["Age"],
             }
@@ -253,6 +254,10 @@ def resolve_pending_customers(df, registry):
 
     return df, registry, audit_records
 
+
+# ============================================================
+# DUPLICATE DETECTION
+# ============================================================
 
 def find_duplicates(df):
 
@@ -397,12 +402,34 @@ def lambda_handler(event, context):
     print(f"Rows after cleaning: {rows_after}")
 
     # --------------------------------------------------------
-    # 7. Remove internal column + write consolidated CSV
+    # 7. Remove internal column + merge with existing consolidated
+    #    data before writing (this write must never replace history
+    #    with only the current run's rows)
     # --------------------------------------------------------
 
     cleaned_df = cleaned_df[EXPECTED_COLUMNS]
-    write_csv_to_s3(cleaned_df, BUCKET, OUTPUT_KEY)
-    print(f"Consolidated file written to s3://{BUCKET}/{OUTPUT_KEY}")
+
+    try:
+        existing_df = read_csv_from_s3(BUCKET, OUTPUT_KEY)
+        existing_df["Purchase Date"] = pd.to_datetime(
+            existing_df["Purchase Date"], errors="coerce"
+        )
+    except s3.exceptions.NoSuchKey:
+        existing_df = pd.DataFrame(columns=EXPECTED_COLUMNS)
+
+    combined_df = pd.concat([existing_df, cleaned_df], ignore_index=True)
+
+    # Guard against re-processing writing the same transaction twice
+    combined_df = combined_df.drop_duplicates(
+        subset="Transaction ID", keep="first"
+    )
+
+    write_csv_to_s3(combined_df, BUCKET, OUTPUT_KEY)
+    print(
+        f"Consolidated file written to s3://{BUCKET}/{OUTPUT_KEY} "
+        f"({len(existing_df)} existing + {len(cleaned_df)} new -> "
+        f"{len(combined_df)} total)"
+    )
 
     # --------------------------------------------------------
     # 8. Delete staging files
