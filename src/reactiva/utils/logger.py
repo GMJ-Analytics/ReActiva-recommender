@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -71,19 +72,9 @@ class StructuredFormatter(logging.Formatter):
 
 def setup_logger(
     name: str = "reactiva",
-    log_dir: str = "artifacts/logs",
+    log_dir: str | None = None,
     level: int = logging.INFO,
 ) -> logging.Logger:
-    """
-    Crea y devuelve un logger reutilizable para ReActiva.
-
-    El logger escribe simultáneamente:
-    - en la terminal;
-    - en un archivo persistente dentro de artifacts/logs.
-
-    Si ya fue configurado previamente, reutiliza los handlers existentes
-    para evitar mensajes duplicados.
-    """
 
     logger = logging.getLogger(name)
     logger.setLevel(level)
@@ -91,12 +82,21 @@ def setup_logger(
     if logger.handlers:
         return logger
 
+    if log_dir is None:
+        if os.getenv("AWS_LAMBDA_FUNCTION_NAME"):
+            log_dir = "/tmp"
+        else:
+            log_dir = "artifacts/logs"
+
     log_path = Path(log_dir)
     log_path.mkdir(parents=True, exist_ok=True)
 
+
+    safe_name = name.replace(".", "_")
+
     log_file = log_path / (
-        f"reactiva_{datetime.now().strftime('%Y-%m-%d')}.log"
-    )
+    f"{safe_name}_{datetime.now().strftime('%Y-%m-%d')}.log"
+)
 
     formatter = StructuredFormatter()
 
@@ -112,7 +112,6 @@ def setup_logger(
     logger.addHandler(file_handler)
     logger.addHandler(console_handler)
 
-    # Evita que el mismo mensaje también sea procesado por el root logger.
     logger.propagate = False
 
     return logger
@@ -124,7 +123,7 @@ def log_event(
     level: int = logging.INFO,
     **data: Any,
 ) -> None:
-    """
+    """-
     Registra un evento estructurado junto con información adicional.
 
     Ejemplos de uso:
