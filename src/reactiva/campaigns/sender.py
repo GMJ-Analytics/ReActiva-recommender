@@ -825,6 +825,20 @@ def process_due_campaign_emails(
 
     updated = campaign_df.copy()
 
+    # CSV columns that may arrive fully empty are inferred by pandas
+    # as float64. They later receive ISO timestamps or error text.
+    string_columns = [
+        "Last Attempt At",
+        "Sent At",
+        "Reactivated At",
+        "Last Error",
+    ]
+
+    updated[string_columns] = (
+        updated[string_columns]
+        .astype("object")
+    )
+
     last_purchase_lookup = (
         build_last_purchase_lookup(
             transactions_df
