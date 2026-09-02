@@ -7,6 +7,7 @@ import pandas as pd
 from reactiva.config import (
     DATASET_URI,
     S3_BUCKET,
+    S3_PREDICTIONS_KEY,
 )
 from reactiva.campaigns.campaign import (
     CAMPAIGN_COLUMNS,
@@ -17,10 +18,6 @@ from reactiva.campaigns.service import (
 from reactiva.campaigns.storage import (
     CAMPAIGN_ACTIVE_KEY,
     read_csv_from_s3,
-    write_csv_to_s3,
-)
-from reactiva.recommender.recommender import (
-    recommend_user_based_inactive_customers,
 )
 
 
@@ -31,12 +28,18 @@ logger = logging.getLogger(__name__)
 # CONFIGURATION
 # ============================================================
 
-MONTHLY_RECOMMENDATION_PREFIX = (
-    "recommender/monthly"
-)
-
 INACTIVITY_DAYS = 270
-TOP_RECOMMENDATIONS = 3
+
+
+RECOMMENDER_OUTPUT_REQUIRED_COLUMNS = [
+    "Customer Name",
+    "Customer Email",
+    "Customer ID",
+    "Location",
+    "Current Season",
+    "Recommendations",
+    "Date",
+]
 
 
 MONTHLY_RECOMMENDATION_REQUIRED_COLUMNS = [
@@ -75,31 +78,6 @@ def normalize_reference_date(
         )
 
     return parsed.normalize()
-
-
-def build_monthly_recommendation_key(
-    reference_date=None,
-) -> str:
-    """
-    Builds the S3 key for the monthly recommendation output.
-
-    Example:
-        recommender/monthly/recommendations_2026-09.csv
-    """
-    reference_date = normalize_reference_date(
-        reference_date
-    )
-
-    campaign_month = (
-        reference_date.strftime(
-            "%Y-%m"
-        )
-    )
-
-    return (
-        f"{MONTHLY_RECOMMENDATION_PREFIX}/"
-        f"recommendations_{campaign_month}.csv"
-    )
 
 
 # ============================================================
@@ -482,135 +460,6 @@ def validate_monthly_recommendations(
 
 
 # ============================================================
-# MONTHLY GBOOST JOB
-# ============================================================
-
-def generate_monthly_recommendations(
-    reference_date=None,
-    bucket: str = S3_BUCKET,
-    dataset_uri: str = DATASET_URI,
-    s3_client=None,
-) -> dict:
-    """
-    Executes the monthly GBoost recommender and persists the
-    recommendation output for the current month.
-
-    One GBoost execution trains once and predicts recommendations
-    for all inactive customers in the same run.
-    """
-    reference_date = (
-        normalize_reference_date(
-            reference_date
-        )
-    )
-
-    campaign_month = (
-        reference_date.strftime(
-            "%Y-%m"
-        )
-    )
-
-    transactions_df = (
-        load_operational_transactions(
-            bucket=bucket,
-            dataset_uri=dataset_uri,
-            s3_client=s3_client,
-        )
-    )
-
-    recommendations_df = (
-        recommend_user_based_inactive_customers(
-            transactions_df,
-            k=TOP_RECOMMENDATIONS,
-            inactivity_days=INACTIVITY_DAYS,
-            persist_predictions=False,
-            reference_date=reference_date,
-        )
-    )
-
-    if (
-        recommendations_df is None
-        or recommendations_df.empty
-    ):
-        raise RuntimeError(
-            "GBoost did not generate valid monthly recommendations"
-        )
-
-    recommendations_df = (
-        recommendations_df.copy()
-    )
-
-    recommendations_df[
-        "Campaign Month"
-    ] = campaign_month
-
-    recommendations_df[
-        "Reference Date"
-    ] = reference_date.strftime(
-        "%Y-%m-%d"
-    )
-
-    validate_monthly_recommendations(
-        recommendations_df=recommendations_df,
-        reference_date=reference_date,
-    )
-
-    recommendations_key = (
-        build_monthly_recommendation_key(
-            reference_date
-        )
-    )
-
-    # Critical S3 write:
-    # storage.py performs up to five attempts.
-    write_csv_to_s3(
-        df=recommendations_df,
-        bucket=bucket,
-        key=recommendations_key,
-        s3_client=s3_client,
-    )
-
-    # Read-after-write verification.
-    verified_df = read_csv_from_s3(
-        bucket=bucket,
-        key=recommendations_key,
-        expected_columns=MONTHLY_RECOMMENDATION_REQUIRED_COLUMNS,
-        s3_client=s3_client,
-    )
-
-    if len(
-        verified_df
-    ) != len(
-        recommendations_df
-    ):
-        raise RuntimeError(
-            "Monthly recommendation verification "
-            "failed after S3 write"
-        )
-
-    validate_monthly_recommendations(
-        recommendations_df=verified_df,
-        reference_date=reference_date,
-    )
-
-    logger.info(
-        "Monthly recommendations generated "
-        "month=%s customers=%s key=%s",
-        campaign_month,
-        len(verified_df),
-        recommendations_key,
-    )
-
-    return {
-        "campaign_month": campaign_month,
-        "reference_date": reference_date,
-        "recommendations_key": recommendations_key,
-        "recommendations": verified_df,
-        "transactions": transactions_df,
-    }
-
-
-# ============================================================
 # LOAD CURRENT MONTH RECOMMENDATIONS
 # ============================================================
 
@@ -620,11 +469,14 @@ def load_monthly_recommendations(
     s3_client=None,
 ) -> pd.DataFrame:
     """
-    Loads ONLY the recommendation output corresponding to the
-    requested month.
+    Loads the existing recommender output from S3 and selects only
+    recommendations that belong to the requested campaign month.
 
-    A missing or invalid output aborts campaign generation.
-    Previous-month recommendations are never reused.
+    Campaigns do not execute or retrain the recommender.
+
+    If a customer appears more than once during the selected month,
+    only the most recent recommendation available up to the
+    reference date is retained.
     """
     reference_date = (
         normalize_reference_date(
@@ -632,28 +484,156 @@ def load_monthly_recommendations(
         )
     )
 
-    recommendations_key = (
-        build_monthly_recommendation_key(
-            reference_date
+    if not S3_PREDICTIONS_KEY:
+        raise ValueError(
+            "S3_PREDICTIONS_KEY is required"
         )
-    )
 
     recommendations_df = read_csv_from_s3(
         bucket=bucket,
-        key=recommendations_key,
-        expected_columns=MONTHLY_RECOMMENDATION_REQUIRED_COLUMNS,
+        key=S3_PREDICTIONS_KEY,
+        expected_columns=RECOMMENDER_OUTPUT_REQUIRED_COLUMNS,
         s3_client=s3_client,
+    )
+
+    if (
+        recommendations_df is None
+        or recommendations_df.empty
+    ):
+        raise RuntimeError(
+            "Recommender output is empty or unavailable"
+        )
+
+    recommendations_df = (
+        recommendations_df.copy()
+    )
+
+    recommendations_df[
+        "Date"
+    ] = pd.to_datetime(
+        recommendations_df[
+            "Date"
+        ],
+        errors="coerce",
+    )
+
+    recommendations_df = (
+        recommendations_df.dropna(
+            subset=[
+                "Customer ID",
+                "Date",
+            ]
+        )
+    )
+
+    recommendations_df[
+        "Customer ID"
+    ] = (
+        recommendations_df[
+            "Customer ID"
+        ]
+        .astype(str)
+        .str.strip()
+    )
+
+    recommendations_df = (
+        recommendations_df[
+            recommendations_df[
+                "Customer ID"
+            ]
+            != ""
+        ]
+        .copy()
+    )
+
+    expected_month = (
+        reference_date.strftime(
+            "%Y-%m"
+        )
+    )
+
+    recommendation_months = (
+        recommendations_df[
+            "Date"
+        ]
+        .dt.strftime(
+            "%Y-%m"
+        )
+    )
+
+    recommendation_dates = (
+        recommendations_df[
+            "Date"
+        ]
+        .dt.normalize()
+    )
+
+    recommendations_df = (
+        recommendations_df[
+            (
+                recommendation_months
+                == expected_month
+            )
+            & (
+                recommendation_dates
+                <= reference_date
+            )
+        ]
+        .copy()
     )
 
     if recommendations_df.empty:
         raise RuntimeError(
             "Recommendations for the current month "
-            f"do not exist: {recommendations_key}"
+            f"do not exist in {S3_PREDICTIONS_KEY}"
         )
+
+    recommendations_df = (
+        recommendations_df
+        .sort_values(
+            "Date"
+        )
+        .drop_duplicates(
+            subset=[
+                "Customer ID",
+            ],
+            keep="last",
+        )
+        .reset_index(
+            drop=True
+        )
+    )
+
+    recommendations_df[
+        "Campaign Month"
+    ] = expected_month
+
+    recommendations_df[
+        "Reference Date"
+    ] = reference_date.strftime(
+        "%Y-%m-%d"
+    )
+
+    recommendations_df = (
+        recommendations_df[
+            MONTHLY_RECOMMENDATION_REQUIRED_COLUMNS
+        ]
+        .copy()
+    )
 
     validate_monthly_recommendations(
         recommendations_df=recommendations_df,
         reference_date=reference_date,
+    )
+
+    logger.info(
+        "Current recommender output loaded "
+        "month=%s customers=%s key=%s",
+        expected_month,
+        len(
+            recommendations_df
+        ),
+        S3_PREDICTIONS_KEY,
     )
 
     return recommendations_df
@@ -670,10 +650,10 @@ def create_campaign_from_monthly_recommendations(
     s3_client=None,
 ) -> dict:
     """
-    Creates the monthly campaign using ONLY the recommendation
-    output generated for the requested month.
+    Creates the monthly campaign using the existing recommender
+    output stored in S3.
 
-    Previous-month recommendation outputs are never reused.
+    Campaigns never execute or retrain the recommendation model.
 
     Customers who participated in the previous active campaign
     and are now confirmed to have purchased within the 270-day
