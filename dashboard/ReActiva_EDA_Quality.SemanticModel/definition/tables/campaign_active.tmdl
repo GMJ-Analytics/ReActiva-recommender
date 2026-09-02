@@ -1,0 +1,360 @@
+table campaign_active
+	lineageTag: 1f4e9a0b-e151-42f6-8fd0-9407acff5312
+
+	measure 'Clientes Objetivo' =
+			
+			DISTINCTCOUNT(campaign_active[Customer ID])
+		formatString: 0
+		lineageTag: dfd0f83b-baa1-415e-8c07-255df403f8cd
+
+	measure Pendientes =
+			
+			CALCULATE(
+			    COUNTROWS(campaign_active),
+			    campaign_active[Status] = "PENDING"
+			)
+		formatString: 0
+		lineageTag: 982a5f01-3a8c-46c5-b15b-208e3ea1b279
+
+	measure Enviados =
+			
+			CALCULATE(
+			    COUNTROWS(campaign_active),
+			    NOT(ISBLANK(campaign_active[Sent At]))
+			)
+		formatString: 0
+		lineageTag: ffca944c-40d0-4889-aae5-c973a70c7b3d
+
+	measure Fallidos =
+			
+			CALCULATE(
+			    COUNTROWS(campaign_active),
+			    campaign_active[Status] = "FAILED"
+			)
+		formatString: 0
+		lineageTag: a579eb5d-3b7a-4023-a758-6eb00af029b7
+
+	measure 'Clientes Reactivados' =
+			
+			CALCULATE(
+			    DISTINCTCOUNT(campaign_active[Customer ID]),
+			    NOT(ISBLANK(campaign_active[Reactivated At]))
+			)
+		formatString: 0
+		lineageTag: 4c271a1c-af8e-443c-b2f0-832e1ea43e60
+
+	measure 'Tasa Reactivacion' =
+			
+			DIVIDE(
+			    [Clientes Reactivados],
+			    [Enviados],
+			    0
+			)
+		formatString: 0.0\ %;-0.0\ %;0.0\ %
+		lineageTag: 2206962b-2491-4303-8629-c1d05f3e8608
+
+	measure 'Cupones Redimidos' =
+			
+			CALCULATE(
+			    COUNTROWS(campaign_active),
+			    NOT(ISBLANK(campaign_active[Coupon Redeemed At]))
+			)
+		formatString: 0
+		lineageTag: 61b71027-e14c-4434-b036-aff9b7d3e4d8
+
+	measure 'Tasa Redencion' =
+			
+			DIVIDE(
+			    [Cupones Redimidos],
+			    [Enviados],
+			    0
+			)
+		formatString: 0.0\ %;-0.0\ %;0.0\ %
+		lineageTag: 836d82e8-d0ec-4511-8dae-c0a3c9f7fd1c
+
+	measure 'Cupones Activos' =
+			
+			CALCULATE(
+			    COUNTROWS(campaign_active),
+			    campaign_active[Coupon Status] = "ACTIVE"
+			)
+		formatString: 0
+		lineageTag: 5369036b-ab4e-49c3-a26b-3e41dda4fdcc
+
+	measure 'Campaña Actual' =
+			
+			SELECTEDVALUE(
+			    campaign_active[Campaign ID],
+			    "Sin campaña"
+			)
+		lineageTag: 33175d7c-0116-4660-8764-b79f14189fb8
+
+	measure 'Mes Campaña' =
+			
+			SELECTEDVALUE(
+			    campaign_active[Campaign Month],
+			    "-"
+			)
+		lineageTag: b58d06e2-0568-4396-a6e3-6eb3f13a4dae
+
+	measure 'Clientes Objetivo Tarjeta' =
+			
+			FORMAT(
+			    [Clientes Objetivo],
+			    "#,##0",
+			    "es-AR"
+			)
+		lineageTag: 295df3b5-f050-49f2-a1d7-5cace3d47d1a
+
+	measure 'Descuento Campaña' =
+			
+			MAX(campaign_active[Discount Percent]) / 100
+		formatString: 0\ %;-0\ %;0\ %
+		lineageTag: 66b92797-17b8-4033-8502-0a266754ab4f
+
+	column 'Campaign ID'
+		dataType: string
+		lineageTag: eb908f9c-c711-49ef-894f-b02f81e1fc02
+		summarizeBy: none
+		sourceColumn: Campaign ID
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Campaign Month'
+		dataType: string
+		lineageTag: 73d4aec0-db6e-490f-aa9f-dc370e6517a3
+		summarizeBy: none
+		sourceColumn: Campaign Month
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Customer ID'
+		dataType: string
+		lineageTag: 82b92e8d-d4a9-48af-ab36-1b5b3fff8509
+		summarizeBy: none
+		sourceColumn: Customer ID
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Customer Full Name'
+		dataType: string
+		lineageTag: bcfef4e3-f8e1-4866-9411-e3786a40d447
+		summarizeBy: none
+		sourceColumn: Customer Full Name
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Customer Email'
+		dataType: string
+		lineageTag: 93ee3193-c9f3-4c6c-b907-cf379c50e2aa
+		summarizeBy: none
+		sourceColumn: Customer Email
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Recommendation 1'
+		dataType: string
+		lineageTag: 5a4865f2-4320-47bc-a468-9222de0a3af2
+		summarizeBy: none
+		sourceColumn: Recommendation 1
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Recommendation 2'
+		dataType: string
+		lineageTag: 5429327e-0c67-4d90-823e-9e8bc847d61d
+		summarizeBy: none
+		sourceColumn: Recommendation 2
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Recommendation 3'
+		dataType: string
+		lineageTag: 054216c5-49e2-42b2-9a08-c694d5d8d31d
+		summarizeBy: none
+		sourceColumn: Recommendation 3
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Discount Percent'
+		dataType: int64
+		formatString: 0
+		lineageTag: ee039b32-78b2-48f2-b6af-48eda610ab7f
+		summarizeBy: sum
+		sourceColumn: Discount Percent
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Coupon Code'
+		dataType: string
+		lineageTag: 3099ecff-3460-41e9-b33f-022c8812d821
+		summarizeBy: none
+		sourceColumn: Coupon Code
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Scheduled Day'
+		dataType: int64
+		formatString: 0
+		lineageTag: 20519637-9f60-4aae-988d-ec645e81aab8
+		summarizeBy: sum
+		sourceColumn: Scheduled Day
+
+		annotation SummarizationSetBy = Automatic
+
+	column Status
+		dataType: string
+		lineageTag: 89ab6d85-f0a0-49f0-b81f-2fbd932c251d
+		summarizeBy: none
+		sourceColumn: Status
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Retry Count'
+		dataType: int64
+		formatString: 0
+		lineageTag: f7d4326d-4e7c-4506-9032-79c728c1131f
+		summarizeBy: sum
+		sourceColumn: Retry Count
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Last Attempt At'
+		dataType: dateTime
+		formatString: General Date
+		lineageTag: 7992b3eb-0941-49f4-aa33-003a503ace18
+		summarizeBy: none
+		sourceColumn: Last Attempt At
+
+		variation Variación
+			isDefault
+			relationship: e3ef4df5-cae8-4b34-a6d3-715116d7e22a
+			defaultHierarchy: LocalDateTable_84b791a2-19cd-492c-9820-e20e9ae6ac13.'Jerarquía de fechas'
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Sent At'
+		dataType: dateTime
+		formatString: General Date
+		lineageTag: e179f6c1-9a4e-4e55-b110-6d203c2de70f
+		summarizeBy: none
+		sourceColumn: Sent At
+
+		variation Variación
+			isDefault
+			relationship: 0fd172e8-7ba3-4150-a11b-8a9b4e9e266a
+			defaultHierarchy: LocalDateTable_9d679ec2-c23a-417a-9b5c-2be85be194cd.'Jerarquía de fechas'
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Reactivated At'
+		dataType: dateTime
+		formatString: General Date
+		lineageTag: 320db77b-6d11-49c7-a168-1a17c392348b
+		summarizeBy: none
+		sourceColumn: Reactivated At
+
+		variation Variación
+			isDefault
+			relationship: 65321b85-eaca-4b42-b2ec-2a568edc5911
+			defaultHierarchy: LocalDateTable_c16c3cbc-2317-4486-9b2b-d98c28eec9fc.'Jerarquía de fechas'
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Coupon Status'
+		dataType: string
+		lineageTag: 0dad6c9b-17ad-4a6a-88ce-2426907fb51a
+		summarizeBy: none
+		sourceColumn: Coupon Status
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Coupon Redeemed At'
+		dataType: dateTime
+		formatString: General Date
+		lineageTag: 8186660d-dd7a-46b9-828a-7ff31890a3d3
+		summarizeBy: none
+		sourceColumn: Coupon Redeemed At
+
+		variation Variación
+			isDefault
+			relationship: db54320d-c039-4eaf-8858-8aa405b4220a
+			defaultHierarchy: LocalDateTable_722a01f4-641b-44a2-a4a8-850b4e4f546b.'Jerarquía de fechas'
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Coupon Transaction ID'
+		dataType: string
+		lineageTag: d0608046-fbd6-4c60-a2ce-cd8581e01025
+		summarizeBy: none
+		sourceColumn: Coupon Transaction ID
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Last Error'
+		dataType: string
+		lineageTag: c1c5c3b2-2fa4-4244-860d-8fefacfd5d37
+		summarizeBy: none
+		sourceColumn: Last Error
+
+		annotation SummarizationSetBy = Automatic
+
+	partition campaign_active = m
+		mode: import
+		source =
+				let
+				    Source =
+				        Csv.Document(
+				            File.Contents(
+				                RutaDatosBI & "\campaign_active.csv"
+				            ),
+				            [
+				                Delimiter = ",",
+				                Columns = 20,
+				                Encoding = 65001,
+				                QuoteStyle = QuoteStyle.None
+				            ]
+				        ),
+				
+				    #"Encabezados promovidos" =
+				        Table.PromoteHeaders(
+				            Source,
+				            [
+				                PromoteAllScalars = true
+				            ]
+				        ),
+				
+				    #"Tipos cambiados" =
+				        Table.TransformColumnTypes(
+				            #"Encabezados promovidos",
+				            {
+				                {"Campaign ID", type text},
+				                {"Campaign Month", type text},
+				                {"Customer ID", type text},
+				                {"Customer Full Name", type text},
+				                {"Customer Email", type text},
+				                {"Recommendation 1", type text},
+				                {"Recommendation 2", type text},
+				                {"Recommendation 3", type text},
+				                {"Discount Percent", Int64.Type},
+				                {"Coupon Code", type text},
+				                {"Scheduled Day", Int64.Type},
+				                {"Status", type text},
+				                {"Retry Count", Int64.Type},
+				                {"Last Attempt At", type datetime},
+				                {"Sent At", type datetime},
+				                {"Reactivated At", type datetime},
+				                {"Coupon Status", type text},
+				                {"Coupon Redeemed At", type datetime},
+				                {"Coupon Transaction ID", type text},
+				                {"Last Error", type text}
+				            },
+				            "en-US"
+				        )
+				in
+				    #"Tipos cambiados"
+
+	annotation PBI_NavigationStepName = Navegación
+
+	annotation PBI_ResultType = Table
+

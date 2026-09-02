@@ -1,0 +1,21 @@
+model,evaluation_type,fold,precision,recall,hit_rate,long_tail_recall,map,ndcg,average
+Content-Based (TF-IDF),fold,1,0.0613,0.2594,0.2903,0.0250,0.1244,0.1618,0.1537
+Content-Based (TF-IDF),fold,2,0.0560,0.2177,0.2632,0.0943,0.1022,0.1367,0.1450
+Content-Based (TF-IDF),fold,3,0.0594,0.2407,0.2708,0.1522,0.1203,0.1556,0.1665
+Content-Based (TF-IDF),mean,,0.0589,0.2393,0.2747,0.0905,0.1156,0.1513,0.1551
+Content-Based (TF-IDF),std,,0.0027,0.0209,0.0140,0.0637,0.0118,0.0131,0.0108
+GBoost (Category Classifier),fold,1,0.0645,0.2675,0.3065,0.1500,0.1317,0.1709,0.1818
+GBoost (Category Classifier),fold,2,0.0679,0.2799,0.3206,0.1887,0.1435,0.1827,0.1972
+GBoost (Category Classifier),fold,3,0.0635,0.2671,0.3069,0.2029,0.1351,0.1737,0.1915
+GBoost (Category Classifier),mean,,0.0653,0.2715,0.3113,0.1805,0.1368,0.1758,0.1902
+GBoost (Category Classifier),std,,0.0023,0.0073,0.0080,0.0274,0.0061,0.0061,0.0078
+Popularity Baseline,fold,1,0.0839,0.3427,0.3952,0.0000,0.1599,0.2112,0.1988
+Popularity Baseline,fold,2,0.0947,0.3971,0.4498,0.0000,0.2038,0.2600,0.2342
+Popularity Baseline,fold,3,0.1018,0.4260,0.4838,0.0000,0.2148,0.2754,0.2503
+Popularity Baseline,mean,,0.0935,0.3886,0.4429,0.0000,0.1928,0.2489,0.2278
+Popularity Baseline,std,,0.0090,0.0423,0.0447,0.0000,0.0291,0.0335,0.0263
+User-Based CF,fold,1,0.0677,0.2903,0.3226,0.2500,0.1224,0.1687,0.2036
+User-Based CF,fold,2,0.0624,0.2632,0.2967,0.1132,0.1259,0.1649,0.1710
+User-Based CF,fold,3,0.0608,0.2503,0.2924,0.0725,0.1058,0.1466,0.1547
+User-Based CF,mean,,0.0637,0.2679,0.3039,0.1452,0.1180,0.1601,0.1765
+User-Based CF,std,,0.0036,0.0204,0.0163,0.0930,0.0107,0.0118,0.0249

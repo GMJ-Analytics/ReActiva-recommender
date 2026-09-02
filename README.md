@@ -58,9 +58,11 @@ Este flujo permite mantener la trazabilidad de las tareas, los aportes individua
 
 ## Estado
 
-El proyecto se encuentra en una etapa avanzada de desarrollo e integración funcional.
+El proyecto se encuentra en una etapa avanzada de integración funcional de extremo a extremo.
 
-Actualmente dispone de componentes funcionales de preparación de datos, análisis exploratorio, ingeniería de features, modelado, recomendación, validación, aplicación interactiva, almacenamiento en AWS S3, logging estructurado, pruebas automáticas, dashboard Power BI, ejecución mediante Docker y un subsistema de campañas mensuales de reactivación con cupones, trazabilidad y mensajería preparado para su despliegue en AWS.
+Actualmente dispone de componentes funcionales de preparación y validación de datos, análisis exploratorio, ingeniería de features, modelado, recomendación, Streamlit, almacenamiento en Amazon S3, logging estructurado, Docker, campañas mensuales de reactivación con cupones y mensajería, componentes AWS Lambda, monitoreo de data drift con Evidently y un dashboard Power BI orientado a negocio, campañas y monitoreo.
+
+La configuración sensible de infraestructura —credenciales, identidades de Amazon SES, URLs públicas y secretos de firma— se mantiene fuera del código y se administra mediante la configuración correspondiente en AWS.
 
 ### Estado actual del desarrollo
 
@@ -96,12 +98,13 @@ evitando, cuando es posible, mantener implementaciones duplicadas entre notebook
 
 ### Arquitectura actual del repositorio
 
-La estructura principal del proyecto es actualmente:
+La estructura principal utilizada por el proyecto es:
 
 ```text
 ReActiva-recommender/
 │
 ├── .github/
+├── .streamlit/
 ├── api/
 ├── app/
 │   ├── app.py
@@ -109,14 +112,17 @@ ReActiva-recommender/
 │
 ├── artifacts/
 │   └── AwsLambda/
-│       ├── lambda.py
 │       ├── Dockerfile
-│       ├── monthly_recommendations/
+│       ├── lambda_consolidator.py
 │       ├── monthly_campaign/
 │       ├── campaign_sender/
-│       └── unsubscribe/
+│       ├── unsubscribe/
+│       └── evidently_drift/
 │
 ├── dashboard/
+│   ├── ReActiva_EDA_Quality.pbip
+│   └── data/
+│
 ├── data/
 ├── docs/
 │   ├── context_features.md
@@ -129,6 +135,8 @@ ReActiva-recommender/
 │   └── 02_recommender_feasibility.ipynb
 │
 ├── reports/
+├── scripts/
+│   └── refresh_bi_data.py
 │
 ├── src/
 │   └── reactiva/
@@ -152,20 +160,16 @@ ReActiva-recommender/
 │       │   ├── build_features.py
 │       │   └── context.py
 │       ├── modeling/
-│       │   ├── backtest.py
-│       │   ├── evaluate.py
-│       │   ├── models_comparison_final_metrics.ipynb
-│       │   ├── optuna_gb_classification.ipynb
-│       │   ├── predict_matriz.py
-│       │   └── train.py
 │       ├── monitoring/
+│       │   ├── drift.py
+│       │   └── run_drift_monitoring.py
 │       ├── pipeline/
-│       │   └── run_pipeline.py
 │       ├── recommender/
 │       │   └── recommender.py
 │       └── utils/
 │
 ├── tests/
+├── actualizar_dashboard.bat
 ├── .dockerignore
 ├── .gitignore
 ├── pyproject.toml
@@ -173,7 +177,9 @@ ReActiva-recommender/
 └── README.md
 ```
 
-Algunas áreas, como la API y la automatización integral de infraestructura, continúan evolucionando mediante Issues específicas. El subsistema funcional de campañas, cupones, baja y mensajería ya se encuentra implementado y probado en código. Su despliegue de infraestructura en AWS se realizará en una Issue y rama separadas por el integrante del equipo con los permisos necesarios sobre ECR, Lambda, EventBridge y SES.
+La lógica reutilizable permanece centralizada dentro de `src/reactiva/`. La API no constituye actualmente el entrypoint operativo de la solución: la interacción de usuario se realiza mediante Streamlit, mientras que los procesos automáticos se desacoplan mediante S3 y AWS Lambda.
+
+Los componentes de campañas, mensajería, baja y monitoreo mantienen separadas sus responsabilidades. La creación de campaña consume la salida vigente del recomendador; el `campaign_sender` no entrena Gradient Boosting, no genera recomendaciones y no crea una campaña nueva.
 
 ### Flujo técnico actual
 
@@ -1418,16 +1424,15 @@ Los clientes nuevos deben ingresar los datos requeridos por el flujo antes de co
 
 La asignación del `Customer ID` persistente se realiza durante la consolidación. El consolidador intenta resolver el `PENDING-UUID` contra el registro de clientes utilizando las señales de identidad disponibles y las reglas definidas para el proyecto.
 
-El proceso considera señales como:
+El consolidador vigente resuelve identidades temporales utilizando la combinación:
 
 ```text
-Customer Email
 Customer Phone normalizado
 Customer Full Name
 Age dentro de la tolerancia configurada
 ```
 
-El email puede utilizarse como señal fuerte cuando existe una coincidencia exacta. Si no resulta suficiente, la combinación de teléfono normalizado, nombre completo y edad permite reducir la fragmentación de identidad.
+`Customer Email` se conserva como atributo del registro de cliente, pero la implementación actual del consolidador no lo utiliza como señal de matching. Esta decisión evita depender de una dirección de correo que puede cambiar entre compras.
 
 Si el cliente puede asociarse de forma confiable con una identidad existente, se reutiliza su `Customer ID`. Si no existe una coincidencia válida, se asigna un nuevo identificador persistente con formato:
 
@@ -1731,14 +1736,14 @@ transacciones consolidadas
 procesos posteriores y futuras ejecuciones
 ```
 
-La incorporación de transacciones en tiempo real o casi real puede considerarse una mejora futura si el volumen o el caso de negocio lo requiere.
+La arquitectura actual adopta consistencia diaria para las transacciones operativas; una integración en tiempo real permanece fuera del alcance vigente.
 
 ### Consolidación nocturna
 
 La consolidación se implementa mediante un componente AWS Lambda ubicado en:
 
 ```text
-artifacts/AwsLambda/lambda.py
+artifacts/AwsLambda/lambda_consolidator.py
 ```
 
 El proceso se encarga de integrar archivos operativos de staging y mantener trazabilidad de la consolidación.
@@ -1993,7 +1998,7 @@ La reconciliación de los objetos de staging corresponde al proceso de consolida
 
 ## Servicio de campañas y mensajería de reactivación
 
-ReActiva incorpora un subsistema mensual de campañas orientado a convertir las recomendaciones para clientes inactivos en acciones comerciales trazables.
+ReActiva incorpora un subsistema mensual que transforma las recomendaciones para clientes inactivos en acciones comerciales trazables.
 
 La lógica reutilizable se encuentra en:
 
@@ -2001,99 +2006,81 @@ La lógica reutilizable se encuentra en:
 src/reactiva/campaigns/
 ```
 
-y se encuentra separada de la recomendación Item-to-Item utilizada en Streamlit durante ventas Offline.
+Este subsistema se mantiene separado del recomendador Item-to-Item utilizado durante ventas Offline y también se mantiene separado del proceso mensual que genera las recomendaciones de reactivación.
+
+La separación de responsabilidades es intencional:
+
+```text
+Recomendador mensual
+        ↓
+archivo canónico de recomendaciones
+        ↓
+creación de campaña
+        ↓
+campaign_active.csv
+        ↓
+campaign_sender
+        ↓
+Amazon SES
+```
+
+El servicio de campañas **no reentrena Gradient Boosting ni genera una segunda salida del modelo**. Consume las recomendaciones ya producidas por el flujo del recomendador.
 
 ### Flujo mensual
 
-El flujo funcional implementado es:
+El flujo funcional es:
 
 ```text
-Día 1
-  │
-  ├── consolidación operativa
-  │
-  ├── ejecución mensual del recomendador Gradient Boosting
-  │       → clientes con >= 270 días de inactividad
-  │       → recomendaciones del mes vigente
-  │
-  ├── creación de campaña REACTIVA-YYYY-MM
-  │       → exclusiones
-  │       → ranking de 1 a 3 productos
-  │       → cupón único
-  │       → asignación balanceada de día de envío
-  │
-  └── días 1 a 5
-          → revalidación de inactividad
-          → envío programado
-          → actualización de estado
+clientes inactivos >= 270 días
+        ↓
+recomendaciones del mes vigente
+        ↓
+creación de campaña REACTIVA-YYYY-MM
+        ↓
+exclusiones y reglas de negocio
+        ↓
+1 a 3 recomendaciones por cliente
+        ↓
+cupón individual
+        ↓
+asignación balanceada de día 1 a 5
+        ↓
+campaign_active.csv
+        ↓
+revalidación de inactividad antes del envío
+        ↓
+Amazon SES
+        ↓
+actualización de estado
 ```
 
-Cada campaña posee un identificador mensual determinístico con formato:
+Cada campaña utiliza un identificador mensual determinístico:
 
 ```text
 REACTIVA-YYYY-MM
 ```
 
-El sistema no reutiliza recomendaciones de meses anteriores para crear una campaña nueva. Si las recomendaciones correspondientes al mes vigente no existen o son inválidas, la creación de campaña debe abortarse en lugar de reciclar resultados históricos.
+La campaña nueva debe consumir recomendaciones correspondientes al período vigente. Si esa salida no existe o no es válida, el proceso no debe sustituirla silenciosamente por recomendaciones históricas.
 
-### Elegibilidad de clientes
+### Elegibilidad y estados
 
-La campaña considera clientes que cumplen el criterio operativo de:
+El criterio operativo de reactivación continúa siendo:
 
 ```text
 >= 270 días de inactividad
 ```
 
-Antes de crear la salida mensual se excluyen, entre otros casos:
+Antes de un envío se vuelve a verificar el estado del cliente.
 
-- clientes con `OPT_OUT` activo;
-- clientes con pausa mensual pendiente después de tres campañas `SENT` sin compra;
-- clientes sin recomendaciones válidas;
-- identificadores inválidos;
-- casos que no cumplen las condiciones de la campaña vigente.
-
-La frontera de 270 días se considera inactiva. Una compra más reciente que ese límite reactiva al cliente.
-
-### Recomendaciones de campaña
-
-Cada cliente elegible recibe entre uno y tres productos respetando el ranking generado por el proceso mensual.
-
-Las recomendaciones se normalizan para:
-
-- conservar el orden;
-- eliminar duplicados;
-- limitar la salida a un máximo de tres productos;
-- excluir clientes sin una recomendación utilizable.
-
-### Distribución de envíos
-
-Los clientes se distribuyen de forma balanceada entre los días 1 y 5 del mes.
-
-La asignación es determinística para una misma campaña, lo que permite reproducir la distribución sin cambiar arbitrariamente el día asignado a un cliente.
-
-El horario de negocio definido para el envío es:
-
-```text
-09:00 — zona horaria Asia/Kolkata
-```
-
-La programación efectiva mediante EventBridge forma parte del despliegue de infraestructura AWS.
-
-### Verificación antes del envío
-
-Antes de cada envío se vuelve a comprobar el estado del cliente.
-
-Si el cliente realizó una compra y dejó de cumplir el criterio de inactividad, el correo no se envía y el registro se marca como:
+Si el cliente ya realizó una compra, el registro pasa a:
 
 ```text
 CANCELLED_REACTIVATED
 ```
 
-Esta verificación evita contactar a un cliente que ya se reactivó entre la generación de la campaña y su día programado de envío.
+y el correo no se envía.
 
-### Estados de envío
-
-La campaña utiliza los estados:
+Los estados operativos del envío son:
 
 ```text
 PENDING
@@ -2102,34 +2089,147 @@ FAILED
 CANCELLED_REACTIVATED
 ```
 
-Los errores temporales de envío pueden programar reintentos. Los errores definitivos, como un correo inválido, se registran sin mantener reintentos innecesarios.
+Los errores temporales pueden programar reintentos. Los errores definitivos, como un email inválido, se registran como fallo sin mantener reintentos innecesarios.
 
-### Email personalizado
+### Distribución de envíos
 
-El servicio genera versión HTML y texto plano del mensaje.
+Los clientes son distribuidos de forma balanceada entre los días:
 
-El contenido incluye:
+```text
+1
+2
+3
+4
+5
+```
+
+del mes.
+
+La asignación es determinística para una misma campaña.
+
+El horario de negocio utilizado por el sender es:
+
+```text
+09:00 — Asia/Kolkata
+```
+
+La Lambda también permite informar explícitamente un `execution_time` durante pruebas controladas.
+
+### Email mediante Amazon SES
+
+El componente AWS:
+
+```text
+artifacts/AwsLambda/campaign_sender/
+```
+
+ejecuta el servicio diario de envío.
+
+Sus responsabilidades son:
+
+- cargar la campaña activa;
+- cargar las transacciones operativas;
+- verificar nuevamente la inactividad;
+- construir el enlace individual de baja;
+- enviar el correo mediante Amazon SES;
+- administrar reintentos;
+- actualizar estados;
+- persistir el reporte técnico del envío.
+
+El `campaign_sender` no:
+
+- entrena Gradient Boosting;
+- genera recomendaciones;
+- crea la campaña mensual.
+
+El mensaje posee versión HTML y texto plano e incluye, cuando corresponde:
 
 - nombre del cliente;
-- productos recomendados;
-- porcentaje de beneficio;
+- recomendaciones;
+- porcentaje de descuento;
 - código de cupón;
-- fecha de vencimiento;
-- enlace individual de baja.
+- vencimiento;
+- enlace de baja.
 
-El asunto configurado para la campaña es:
+El asunto configurado actualmente es:
 
 ```text
 Increíbles Ofertas
 ```
 
-ReActiva se utiliza como nombre de la marca simulada, ya que el dataset de origen no identifica una cadena física específica.
+### Configuración externa del sender
+
+El sender requiere configuración de infraestructura mediante variables de entorno.
+
+Los nombres utilizados por la implementación son:
+
+```text
+SES_SENDER_EMAIL
+UNSUBSCRIBE_BASE_URL
+UNSUBSCRIBE_SECRET
+AWS_REGION
+```
+
+`SES_SENDER_EMAIL` debe corresponder a una identidad permitida por Amazon SES.
+
+`UNSUBSCRIBE_BASE_URL` apunta al endpoint público utilizado para procesar la baja.
+
+`UNSUBSCRIBE_SECRET` se utiliza solamente para generar y validar la firma HMAC.
+
+Los **valores** de estas variables nunca deben incluirse en GitHub, documentación pública, capturas o archivos de configuración versionados.
+
+### Baja de campañas
+
+La Lambda:
+
+```text
+artifacts/AwsLambda/unsubscribe/
+```
+
+procesa el enlace individual incluido en el correo.
+
+El enlace contiene:
+
+```text
+customer_id
+campaign_id
+token
+```
+
+El token se genera mediante HMAC a partir del cliente, la campaña y un secreto privado.
+
+La Lambda de baja valida el token utilizando comparación segura y actualiza el estado correspondiente del cliente.
+
+El mismo valor de:
+
+```text
+UNSUBSCRIBE_SECRET
+```
+
+debe estar configurado en el generador del enlace y en la Lambda que lo valida, pero el secreto existe exclusivamente en la configuración del entorno AWS.
+
+### Robustez frente a CSV operativos
+
+Los archivos de campaña pueden contener columnas completamente vacías antes del primer envío, por ejemplo:
+
+```text
+Last Attempt At
+Sent At
+Reactivated At
+Last Error
+```
+
+Pandas puede inferir esas columnas vacías como `float64`.
+
+El sender normaliza esas columnas a un tipo compatible antes de escribir timestamps ISO o mensajes de error, evitando fallos de tipo durante la actualización del estado de campaña.
+
+La corrección no modifica la lógica de negocio, los estados ni los reintentos.
 
 ### Cupones
 
-Cada cliente recibe un cupón único por campaña.
+Cada cliente incluido en la campaña recibe un cupón individual.
 
-Características implementadas:
+Características vigentes:
 
 ```text
 6 caracteres alfanuméricos en mayúsculas
@@ -2141,29 +2241,31 @@ asociación a productos recomendados
 registro del Transaction ID al consumirse
 ```
 
-En la simulación actual ReActiva no funciona como sistema de facturación o POS. Por ese motivo no calcula el importe final de la venta ni modifica automáticamente `Quantity`, `Purchase Amount (₹)` o `Discount (%)`.
+Estados principales:
 
-La validación del cupón no impone una relación de cantidad. Su responsabilidad es comprobar que el código sea válido, pertenezca al cliente, corresponda al mes vigente, esté activo y se utilice sobre un producto recomendado.
+```text
+ACTIVE
+REDEEMED
+EXPIRED
+```
+
+ReActiva no funciona como sistema de facturación o POS. El servicio valida el cupón y registra su consumo, pero no sustituye el cálculo financiero final de una venta.
 
 ### Validación de cupones desde Streamlit
 
-La indexación individual de Streamlit incorpora un campo opcional para código de cupón.
-
-Cuando se informa un cupón, la aplicación valida:
+Cuando se informa un cupón durante una operación individual, Streamlit valida:
 
 ```text
 cupón
 + Customer ID
 + mes de campaña
-+ producto registrado
++ producto
 + estado ACTIVE
 ```
 
-Si la validación falla antes de registrar la venta, la operación con ese beneficio se detiene y se informa el motivo al operador.
+El consumo se persiste solamente después de confirmar el registro de la transacción o reconocer idempotentemente la misma transacción.
 
-El cupón se marca como utilizado solamente después de confirmar que la transacción quedó registrada o que la misma transacción ya existía de manera idempotente.
-
-Al consumirse se persiste:
+Al redimirse se registran:
 
 ```text
 Coupon Status = REDEEMED
@@ -2171,45 +2273,28 @@ Coupon Redeemed At
 Coupon Transaction ID
 ```
 
-Si la venta ya fue registrada pero ocurre un error técnico al persistir el consumo del cupón, Streamlit informa el problema y conserva el mismo `Transaction ID` para permitir un reintento sin duplicar la venta. El fallo del subsistema de cupón no debe impedir que la aplicación continúe con el flujo posterior de recomendación Item-to-Item.
+Un cupón ya redimido no puede reutilizarse con otro `Transaction ID`.
 
-### Idempotencia del consumo
+### Ciclo de reactivación
 
-Si una misma transacción vuelve a solicitar el consumo del mismo cupón, el servicio reconoce la asociación ya realizada y evita generar un segundo consumo.
+Cuando un cliente incluido en campaña vuelve a comprar:
 
-Un cupón `REDEEMED` no puede utilizarse posteriormente con otro `Transaction ID`.
+- se registra la reactivación;
+- se reinician los contadores asociados al ciclo sin compra;
+- se elimina una pausa pendiente cuando corresponde;
+- se conserva la trazabilidad de campaña y transacción.
 
-### Reactivación y ciclo de campañas
+La baja voluntaria y la pausa automática después de campañas sin compra son mecanismos diferentes.
 
-Cuando se confirma una nueva compra de un cliente previamente incluido en una campaña:
+### Persistencia en Amazon S3
 
-- se considera reactivado;
-- se reinicia el contador de campañas sin compra;
-- se elimina una pausa pendiente;
-- se registra la fecha de reactivación;
-- una nueva compra también reinicia el estado `OPT_OUT` definido por la lógica del proyecto.
-
-Si un cliente acumula tres campañas `SENT` sin registrar compra, se omite su participación en la campaña mensual siguiente. Después de consumir esa pausa queda nuevamente habilitado para futuras campañas si continúa cumpliendo el criterio de inactividad.
-
-La baja voluntaria mediante enlace y la pausa después de tres campañas son mecanismos diferentes: la primera representa una decisión explícita del cliente y la segunda una regla temporal de negocio para evitar saturación.
-
-### Baja de campañas
-
-Cada email incorpora un enlace individual de baja.
-
-La URL contiene los identificadores de cliente y campaña junto con un token firmado mediante HMAC. La validación se realiza en la Lambda de baja utilizando el mismo secreto configurado para el generador de enlaces.
-
-El componente preparado para esta responsabilidad se encuentra en:
+La información de campañas utiliza el prefijo:
 
 ```text
-artifacts/AwsLambda/unsubscribe/
+campaigns/
 ```
 
-La exposición pública de la Lambda mediante Function URL se realizará durante el despliegue de infraestructura AWS.
-
-### Persistencia en S3
-
-La información de campañas se organiza bajo:
+con salidas como:
 
 ```text
 campaigns/
@@ -2219,54 +2304,403 @@ campaigns/
 └── reports/
 ```
 
-Los componentes de persistencia incluyen reintentos para escrituras críticas y verificaciones posteriores cuando una operación necesita confirmar que el estado quedó almacenado correctamente.
+`campaign_active.csv` representa el estado operativo del ciclo vigente.
 
-### Lambdas preparadas para el despliegue
+Los procesos de campaña consumen y actualizan estos artefactos sin regenerar el modelo de recomendación.
 
-La Issue #60 deja preparados cuatro componentes containerizados:
+### Validación operativa registrada — campaña septiembre 2026
+
+Durante la validación funcional en AWS se generó correctamente la campaña:
 
 ```text
-artifacts/AwsLambda/monthly_recommendations/
+REACTIVA-2026-09
+```
+
+con:
+
+```text
+1.184 clientes objetivo
+10% de descuento
+1.184 cupones activos
+```
+
+La distribución programada quedó:
+
+```text
+Día 1: 237
+Día 2: 237
+Día 3: 237
+Día 4: 237
+Día 5: 236
+```
+
+En el momento de esa validación inicial la campaña se encontraba en estado operativo previo al envío:
+
+```text
+PENDING: 1.184
+SENT: 0
+REACTIVATED: 0
+REDEEMED: 0
+```
+
+Estos valores constituyen una **fotografía operativa de esa ejecución** y no deben interpretarse como resultados comerciales futuros ni como una tasa esperada de conversión.
+
+### Componentes AWS Lambda vigentes
+
+Dentro de los artefactos versionados se encuentran actualmente:
+
+```text
+artifacts/AwsLambda/lambda_consolidator.py
 artifacts/AwsLambda/monthly_campaign/
 artifacts/AwsLambda/campaign_sender/
 artifacts/AwsLambda/unsubscribe/
+artifacts/AwsLambda/evidently_drift/
 ```
 
-Sus responsabilidades son:
+La generación de recomendaciones y la ejecución de campañas permanecen desacopladas.
 
-- `monthly_recommendations`: ejecutar el proceso mensual de recomendación para clientes inactivos;
-- `monthly_campaign`: construir y persistir la campaña mensual;
-- `campaign_sender`: procesar los envíos programados y actualizar sus estados;
-- `unsubscribe`: validar el enlace firmado y registrar la baja del cliente.
+La configuración de ECR, Lambda, Amazon SES, Function URL y EventBridge corresponde a infraestructura AWS y no debe contener secretos dentro del repositorio.
 
-Las imágenes Docker fueron construidas y validadas localmente. El despliegue en ECR/Lambda, la configuración de SES, la Function URL y los schedules de EventBridge quedan deliberadamente separados de esta rama porque el usuario de desarrollo utilizado durante la Issue #60 está restringido por una AWS Permissions Boundary que no permite operar ECR ni Lambda.
+---
 
-El despliegue será realizado mediante una Issue y rama de infraestructura separadas por el integrante del equipo con permisos AWS suficientes.
+## Monitoreo de data drift con Evidently
 
-### Pruebas del subsistema de campañas
-
-La lógica de campañas cuenta con pruebas automáticas para, entre otros casos:
-
-- generación mensual;
-- elegibilidad y exclusiones;
-- ranking de recomendaciones;
-- cupones;
-- idempotencia;
-- persistencia S3;
-- reactivaciones;
-- pausa después de tres campañas;
-- envío y reintentos;
-- enlace firmado de baja;
-- integración del sender con el enlace de unsubscribe;
-- compatibilidad de tipos al leer columnas vacías desde S3.
-
-La suite específica de campañas registró:
+ReActiva incorpora monitoreo de cambios de distribución mediante:
 
 ```text
-116 tests OK
+Evidently 0.7.21
 ```
 
-y la Lambda de baja cuenta además con su conjunto dedicado de pruebas automáticas.
+La lógica principal se encuentra en:
+
+```text
+src/reactiva/monitoring/drift.py
+src/reactiva/monitoring/run_drift_monitoring.py
+```
+
+y el artefacto de Lambda en:
+
+```text
+artifacts/AwsLambda/evidently_drift/
+```
+
+El monitoreo está deliberadamente desacoplado de:
+
+- entrenamiento;
+- generación de recomendaciones;
+- campañas;
+- ejecución del sender.
+
+Un resultado de drift **no bloquea automáticamente el modelo y no dispara reentrenamiento automático**.
+
+### Ventanas temporales
+
+El proceso construye dos ventanas consecutivas de:
+
+```text
+90 días
+```
+
+tomando como referencia la fecha máxima disponible en el dataset.
+
+Conceptualmente:
+
+```text
+ventana de referencia — 90 días
+             ↓
+ventana actual — 90 días
+             ↓
+comparación Evidently
+```
+
+Antes de ejecutar el reporte se construyen las features de cliente utilizadas por el modelo.
+
+### Features monitoreadas
+
+La validación productiva actual monitorea cinco features:
+
+```text
+cat_count_Accessories
+cat_count_Clothing
+cat_count_Footwear
+total_purchases
+days_since_last_purchase
+```
+
+### Estado global
+
+Evidently calcula drift a nivel de feature y también la proporción global:
+
+```text
+drift_share
+```
+
+El umbral global vigente es:
+
+```text
+0.50
+```
+
+Por lo tanto:
+
+```text
+drift_share >= 0.50 → DRIFT
+drift_share < 0.50  → OK
+```
+
+Una feature puede presentar drift sin que el conjunto completo cambie su estado global.
+
+### Salidas en S3
+
+Las salidas más recientes se guardan en:
+
+```text
+monitoring/evidently/latest/drift_summary.csv
+monitoring/evidently/latest/drift_features.csv
+monitoring/evidently/latest/drift_report.json
+```
+
+El historial se conserva en:
+
+```text
+monitoring/evidently/history/drift_summary_history.csv
+monitoring/evidently/history/drift_features_history.csv
+monitoring/evidently/history/<run_id>/drift_report.json
+```
+
+Esto permite mantener tanto el último estado como la evolución de las ejecuciones.
+
+### Validación operativa registrada — 02/09/2026
+
+La primera ejecución real validada produjo:
+
+```text
+reference_rows: 1.027
+current_rows: 714
+features evaluadas: 5
+features con drift: 1
+drift_share: 0.20
+umbral global: 0.50
+estado global: OK
+```
+
+La feature detectada con drift fue:
+
+```text
+days_since_last_purchase
+```
+
+con un score aproximado:
+
+```text
+0.6473
+```
+
+El resultado:
+
+```text
+1 / 5 = 20%
+```
+
+se mantuvo por debajo del umbral global del 50%, por lo que el estado general permaneció `OK`.
+
+Este resultado es una fotografía de esa ejecución y no debe presentarse como un valor permanente.
+
+---
+
+## Dashboard Power BI
+
+El proyecto incorpora un dashboard interactivo de negocio, campañas y monitoreo desarrollado en Power BI.
+
+El proyecto se almacena en formato:
+
+```text
+PBIP
+```
+
+dentro de:
+
+```text
+dashboard/
+```
+
+Las páginas vigentes son:
+
+```text
+1. Resumen Ejecutivo
+2. Análisis Comercial
+3. Reactivación y Campañas
+4. Monitoreo del Modelo
+```
+
+### Resumen Ejecutivo
+
+Presenta indicadores generales de negocio y calidad, entre ellos:
+
+- transacciones;
+- clientes;
+- productos;
+- ingresos;
+- ticket promedio;
+- devoluciones;
+- evolución mensual;
+- categorías;
+- canal Online/Offline;
+- indicadores de calidad.
+
+### Análisis Comercial
+
+Permite analizar:
+
+- ubicación;
+- categoría;
+- marca;
+- estado del cliente;
+- productos;
+- grupos de edad;
+- métodos de pago.
+
+La clasificación Activo/Inactivo utiliza el criterio operativo definido por el proyecto.
+
+### Reactivación y Campañas
+
+Consume el estado vigente de:
+
+```text
+campaign_active.csv
+```
+
+y permite seguir el recorrido desde la recomendación hasta la acción comercial.
+
+Incluye:
+
+- clientes objetivo;
+- pendientes;
+- enviados;
+- clientes reactivados;
+- tasa de reactivación;
+- cupones activos;
+- cupones redimidos;
+- tasa de redención;
+- descuento de campaña;
+- distribución programada por día;
+- recomendaciones 1, 2 y 3;
+- estado de campaña.
+
+Cuando todavía no existen envíos o redenciones, el dashboard muestra el estado real disponible y no inventa conversiones.
+
+### Monitoreo del Modelo
+
+La página:
+
+```text
+Monitoreo de Data Drift — Evidently
+```
+
+consume el historial generado por el proceso de monitoreo.
+
+Incluye:
+
+- estado global;
+- drift observado;
+- cantidad de features con drift;
+- cantidad total de features;
+- última evaluación;
+- detalle por feature;
+- score;
+- método;
+- umbral;
+- evolución histórica.
+
+El dashboard presenta las señales de monitoreo, pero no ejecuta reentrenamiento.
+
+### Sincronización S3 → Power BI
+
+Power BI no se conecta directamente a S3 dentro de esta implementación.
+
+La actualización se realiza mediante:
+
+```text
+scripts/refresh_bi_data.py
+```
+
+que descarga y valida los archivos necesarios desde Amazon S3 hacia:
+
+```text
+dashboard/data/
+```
+
+Actualmente sincroniza:
+
+```text
+monitoring/evidently/history/drift_summary_history.csv
+monitoring/evidently/history/drift_features_history.csv
+campaigns/campaign_active.csv
+```
+
+El archivo:
+
+```text
+actualizar_dashboard.bat
+```
+
+automatiza el flujo local:
+
+```text
+ejecutar .bat
+      ↓
+usar Python del entorno virtual
+      ↓
+descargar datos desde S3
+      ↓
+validar archivos
+      ↓
+actualizar dashboard/data/
+      ↓
+abrir Power BI
+      ↓
+presionar Actualizar
+```
+
+Este mecanismo permite mantener el dashboard portable sin afirmar una conexión directa Power BI → S3 ni depender obligatoriamente de Power BI Service.
+
+### Portabilidad del proyecto Power BI
+
+Las consultas locales utilizan el parámetro:
+
+```text
+RutaDatosBI
+```
+
+como ruta base hacia `dashboard/data`.
+
+De esta manera otra computadora puede utilizar el proyecto ajustando un único parámetro de ruta local en lugar de modificar cada consulta individualmente.
+
+### Estado de pruebas y validación
+
+Después de integrar el monitoreo con Evidently, la suite completa del proyecto registró:
+
+```text
+144 passed
+```
+
+Posteriormente se realizó un ajuste puntual de compatibilidad de tipos en `src/reactiva/campaigns/sender.py` para columnas vacías provenientes de CSV.
+
+Ese ajuste final fue validado mediante:
+
+```bash
+python -m py_compile src/reactiva/campaigns/sender.py
+```
+
+sin modificar la lógica funcional del sender.
+
+Los detalles de problemas encontrados, causas y soluciones se mantienen en:
+
+```text
+docs/troubleshooting/README.md
+```
+
+---
 
 ## Dependencias
 
@@ -2301,6 +2735,8 @@ Entre las principales tecnologías presentes actualmente se encuentran:
 - botocore;
 
 - s3fs;
+
+- Evidently;
 
 - matplotlib;
 
@@ -2414,253 +2850,118 @@ La construcción debe realizarse utilizando la raíz del repositorio como contex
 
 ## Consolidador de transacciones — AWS Lambda
 
-El proyecto incluye un componente AWS Lambda responsable de consolidar los archivos de transacciones cargados en el área de staging de Amazon S3.
-
-El código fuente principal de la Lambda se encuentra en:
+El proyecto incluye un componente AWS Lambda de consolidación cuyo código versionado se encuentra en:
 
 ```text
-artifacts/AwsLambda/lambda.py
+artifacts/AwsLambda/lambda_consolidator.py
 ```
 
-El consolidador procesa archivos CSV almacenados bajo el prefijo de staging configurado, los integra en un archivo consolidado de transacciones, identifica duplicados y genera registros de auditoría para conservar trazabilidad del procesamiento.
+El consolidador integra transacciones operativas almacenadas en S3, valida su estructura, resuelve identidades temporales, mantiene un registro persistente de clientes y genera auditorías.
 
-### Flujo del consolidador
+### Responsabilidades principales
 
-El proceso implementado sigue, de forma general, este flujo:
+El flujo actual contempla:
 
 ```text
-Streamlit / fuente de transacciones
-              │
-              ▼
-          Amazon S3
-              │
-              ▼
-      CSV de transacciones en staging
-              │
-              ▼
-       AWS Lambda Consolidador
-              │
-              ├── leer archivos CSV
-              ├── validar esquema
-              ├── concatenar transacciones
-              ├── convertir Purchase Date
-              ├── resolver identidad de clientes
-              ├── detectar duplicados
-              ├── eliminar duplicados
-              ├── escribir CSV consolidado
-              ├── escribir auditorías
-              └── eliminar staging procesado
-              │
-              ▼
-       Dataset consolidado de transacciones
+staging
+   ↓
+lectura de CSV
+   ↓
+validación de columnas
+   ↓
+conversión de Purchase Date
+   ↓
+resolución de PENDING-UUID
+   ↓
+reconciliación operativa de duplicados
+   ↓
+escritura del dataset consolidado
+   ↓
+actualización del customer registry
+   ↓
+auditorías
 ```
 
-### Funciones principales de la Lambda
+La implementación conserva como esquema esperado las 28 columnas canónicas.
 
-El consolidador utiliza funciones auxiliares para leer objetos desde S3, resolver identidad, detectar duplicados y ejecutar el flujo completo desde `lambda_handler()`.
+### Resolución de clientes temporales
 
-#### `read_csv_from_s3()`
+Para registros con:
 
-```python
-read_csv_from_s3(bucket, key)
+```text
+PENDING-<uuid>
 ```
 
-Esta función lee un objeto CSV individual directamente desde Amazon S3.
+la implementación actual utiliza como señales de matching:
 
-El objeto se obtiene mediante `boto3`, se decodifica como texto y se carga en un DataFrame de pandas. De esta manera la Lambda puede procesar los archivos de staging sin depender de una descarga permanente en almacenamiento local.
-
-#### `find_duplicates()`
-
-```python
-find_duplicates(df)
+```text
+Customer Phone normalizado
+Customer Full Name normalizado
+Age con tolerancia
 ```
 
-Esta función identifica transacciones que cumplen las reglas de duplicación definidas por el consolidador.
+La tolerancia de edad configurada en el consolidador es de:
 
-Las transacciones se comparan utilizando los campos de identidad configurados y `Purchase Date`. Cuando dos operaciones equivalentes se producen dentro del umbral temporal definido, la transacción más antigua se conserva y la posterior puede clasificarse como duplicada.
+```text
+2 años
+```
 
-El proceso genera información de auditoría para los duplicados detectados, incluyendo datos como:
+`Customer Email` se conserva dentro del registro de cliente, pero la implementación vigente no lo utiliza como señal de matching.
 
-- transacción duplicada;
-- motivo de duplicación;
+Si no existe una coincidencia válida se crea un nuevo:
+
+```text
+Customer ID = CUSTXXXXXX
+```
+
+y la decisión queda registrada en la auditoría de identidad.
+
+### Reconciliación adicional de duplicados
+
+La validación general del proyecto considera `Transaction ID` como identidad única de una operación.
+
+Además, el consolidador vigente mantiene una defensa operativa adicional para detectar filas prácticamente equivalentes: agrupa por campos de identidad de la compra y compara `Purchase Date`.
+
+La tolerancia implementada es:
+
+```text
+<= 2 segundos
+```
+
+Cuando se aplica esta regla se conserva trazabilidad sobre:
+
 - transacción retenida;
-- fecha de compra de la transacción conservada;
-- diferencia temporal entre operaciones;
-- marca temporal de procesamiento.
+- transacción clasificada como duplicada;
+- motivo;
+- diferencia temporal;
+- timestamp de procesamiento.
 
-### `lambda_handler()`
+Esta regla adicional pertenece al consolidador y no reemplaza las validaciones de integridad de `Transaction ID` realizadas en otras capas.
 
-```python
-lambda_handler(event, context)
-```
+### Persistencia y auditoría
 
-Es el punto de entrada de la Lambda y coordina el flujo completo de consolidación.
-
-Entre sus responsabilidades se encuentran:
-
-1. listar los archivos CSV del prefijo de staging;
-2. leer cada archivo;
-3. validar la presencia de las columnas esperadas;
-4. concatenar los DataFrames;
-5. convertir `Purchase Date` a fecha y hora;
-6. validar las fechas;
-7. resolver la identidad de clientes temporales;
-8. detectar duplicados;
-9. eliminar las operaciones clasificadas como duplicadas;
-10. escribir el dataset canónico acumulado;
-11. actualizar el registro de clientes;
-12. generar auditorías de identidad y duplicados;
-13. eliminar los archivos de staging procesados únicamente después de completar correctamente las escrituras;
-14. devolver un resumen de la ejecución.
-
-### Organización en S3
-
-El consolidador trabaja con objetos de staging y mantiene el dataset canónico acumulado junto con salidas operativas en prefijos separados.
-
-Entre las rutas utilizadas por la arquitectura se encuentran:
+Entre las salidas operativas utilizadas por este componente se encuentran:
 
 ```text
-staging/individual/
-staging/batch/
 customer_shopping_behavior-clean.csv
 customer_registry/
 duplicate_audit/
 identity_merge_audit/
 ```
 
-El prefijo de staging no se elimina como estructura lógica; solamente se eliminan o archivan los objetos procesados después de confirmar una consolidación exitosa.
+Los objetos de staging solamente deben eliminarse después de completar correctamente las escrituras correspondientes.
 
-### Lambda containerizada
+### Despliegue
 
-El consolidador se empaqueta como contenedor Docker utilizando la imagen base oficial de AWS Lambda para Python.
-
-El Dockerfile se encuentra en:
+Los artefactos de AWS Lambda se mantienen bajo:
 
 ```text
-artifacts/AwsLambda/Dockerfile
+artifacts/AwsLambda/
 ```
 
-La imagen utiliza:
+La construcción y publicación de imágenes, la configuración de funciones y los permisos de infraestructura se realizan con credenciales externas al repositorio.
 
-```dockerfile
-FROM public.ecr.aws/lambda/python:3.12
-```
-
-La imagen base proporciona Python 3.12 y el entorno de ejecución de AWS Lambda. La dependencia adicional necesaria para el procesamiento tabular es pandas.
-
-```dockerfile
-RUN pip install --no-cache-dir pandas
-```
-
-El código de la Lambda se copia al directorio de trabajo del runtime y el punto de entrada se configura mediante:
-
-```dockerfile
-CMD ["lambda.lambda_handler"]
-```
-
-A diferencia del contenedor de Streamlit, esta imagen no necesita exponer un puerto de aplicación mediante `EXPOSE`, porque las invocaciones son administradas por el runtime de AWS Lambda.
-
-### Construcción de la imagen Lambda
-
-La imagen puede construirse para una arquitectura compatible con AWS Lambda. En los entornos donde sea necesario forzar AMD64 se utiliza una construcción equivalente a:
-
-```powershell
-docker buildx build `
-  --platform linux/amd64 `
-  --provenance=false `
-  -t consolidator:latest `
-  --load `
-  .
-```
-
-`--platform linux/amd64` permite fijar la arquitectura objetivo y `--provenance=false` evita metadatos de procedencia que puedan generar incompatibilidades con determinados manifiestos aceptados por Lambda.
-
-### Amazon ECR
-
-Después de construir la imagen, esta puede etiquetarse con la URI del repositorio ECR correspondiente y publicarse utilizando credenciales AWS con permisos suficientes.
-
-El despliegue de imágenes requiere permisos sobre ECR y Lambda. Estos permisos no están disponibles para todos los usuarios del proyecto debido a las Permissions Boundaries configuradas en la cuenta AWS.
-
-La imagen puede etiquetarse para el repositorio ECR correspondiente con:
-
-```powershell
-docker tag consolidator:latest `
-xxxxxxxxxxxx.dkr.ecr.us-east-1.amazonaws.com/consolidator:latest
-```
-
-Luego se realiza la autenticación contra Amazon ECR:
-
-```powershell
-aws ecr get-login-password --region us-east-1 |
-docker login --username AWS --password-stdin `
-xxxxxxxxxxxx.dkr.ecr.us-east-1.amazonaws.com
-```
-
-Y finalmente se publica la imagen:
-
-```powershell
-docker push `
-xxxxxxxxxxxx.dkr.ecr.us-east-1.amazonaws.com/consolidator:latest
-```
-
-La imagen publicada en ECR puede utilizarse posteriormente como imagen de contenedor de la función AWS Lambda.
-
-Por ese motivo, las operaciones de despliegue deben ser ejecutadas por el integrante autorizado y nunca deben implicar la publicación de credenciales o secretos en el repositorio.
-
-### Prueba local de la Lambda
-
-El contenedor de Lambda puede ejecutarse localmente con Docker para validar su carga y su punto de entrada antes del despliegue.
-
-Por ejemplo:
-
-```powershell
-docker run --rm -p 9000:8080 consolidator
-```
-
-El Runtime Interface de la imagen base escucha internamente en el puerto `8080`. La máquina local puede mapearlo al puerto `9000` para pruebas.
-
-Una invocación local puede enviarse mediante:
-
-```powershell
-Invoke-RestMethod -Method Post `
-  -Uri "http://localhost:9000/2015-03-31/functions/function/invocations" `
-  -Body '{}'
-```
-
-Esto permite validar el contenedor antes de publicarlo en AWS.
-
-### Arquitectura actual del consolidador
-
-```text
-Streamlit / cargas operativas
-            │
-            ▼
-        Amazon S3
-            │
-            ▼
-          staging
-            │
-            ▼
-       AWS Lambda
-Consolidador de transacciones
-            │
-            ├── validación
-            ├── resolución de identidad
-            ├── concatenación
-            ├── detección de duplicados
-            └── auditoría
-            │
-            ├──────────────► Transacciones consolidadas
-            │                Amazon S3
-            │
-            ├──────────────► Registro de clientes
-            │                Amazon S3
-            │
-            └──────────────► Auditorías
-                             Amazon S3
-```
-
-Este componente separa la ingesta de transacciones de su consolidación y proporciona un mecanismo auditable para mantener la identidad de clientes, integrar operaciones y registrar decisiones de deduplicación.
+El README no incluye comandos con cuentas, URIs privadas ni secretos de AWS.
 
 # Resolución de identidad de clientes y consolidación de transacciones
 
@@ -2702,9 +3003,15 @@ Cuando una transacción llega con un `Customer ID` temporal `PENDING-*`, el sist
 
 ### Estrategia de coincidencia de identidad
 
-La resolución utiliza un enfoque escalonado.
+La implementación actual del consolidador utiliza una regla conservadora basada en la combinación de:
 
-La coincidencia por email constituye una señal fuerte cuando está disponible. Cuando no resulta suficiente, el proceso puede utilizar la combinación de señales de identidad definida por el consolidador, como teléfono normalizado, nombre completo y edad dentro de la tolerancia configurada.
+```text
+teléfono normalizado
++ nombre completo normalizado
++ edad dentro de la tolerancia configurada
+```
+
+`Customer Email` se conserva como atributo informativo, pero no se utiliza actualmente como señal de matching en `lambda_consolidator.py`.
 
 Si ninguna regla permite resolver el cliente, se crea un nuevo `Customer ID` persistente.
 
@@ -2722,7 +3029,7 @@ pueden normalizarse a una representación numérica comparable.
 
 ## Uso conjunto de teléfono, nombre completo y edad
 
-El email es una señal útil, pero por sí solo no garantiza continuidad de identidad porque una persona puede utilizar una dirección distinta en una compra posterior.
+El email se conserva como dato de perfil, pero la implementación vigente no lo utiliza para resolver identidades porque una persona puede utilizar una dirección distinta en una compra posterior.
 
 Si el email fuera el único criterio, el mismo cliente podría quedar representado de esta forma:
 

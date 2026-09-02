@@ -1,0 +1,209 @@
+table drift_features_history
+	lineageTag: 7d277cd5-0bf8-41ce-a4f0-da096d5c2ba8
+
+	measure 'Es Ultima Corrida Feature' =
+			
+			VAR UltimoRun =
+			    [Ultimo Run ID Drift]
+			VAR RunActual =
+			    SELECTEDVALUE(drift_features_history[run_id])
+			RETURN
+			    IF(
+			        RunActual = UltimoRun,
+			        1,
+			        0
+			    )
+		formatString: 0
+		lineageTag: 0525aa0e-eb96-4464-bd00-4c0ccbad0f53
+
+	column run_id
+		dataType: string
+		lineageTag: 0894acaf-dffe-4c6d-a6b5-d16e2a2e66cb
+		summarizeBy: none
+		sourceColumn: run_id
+
+		annotation SummarizationSetBy = Automatic
+
+	column evaluated_at_utc
+		dataType: dateTime
+		formatString: General Date
+		lineageTag: a7ffaa1b-1646-4636-9ab5-9a5dfe5f3be8
+		summarizeBy: none
+		sourceColumn: evaluated_at_utc
+
+		variation Variación
+			isDefault
+			relationship: 7d459814-de80-4e5a-a1d6-cbfc9e82f82b
+			defaultHierarchy: LocalDateTable_8507e52a-bbd1-4a47-8377-338ffb7a408a.'Jerarquía de fechas'
+
+		annotation SummarizationSetBy = Automatic
+
+	column column
+		dataType: string
+		lineageTag: b7b6cc60-3459-4944-a388-506f26f70ba3
+		summarizeBy: none
+		sourceColumn: column
+
+		annotation SummarizationSetBy = Automatic
+
+	column drift_score
+		dataType: double
+		lineageTag: d3796237-4803-435f-82a6-e6de8b0bdfc8
+		summarizeBy: sum
+		sourceColumn: drift_score
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
+
+	column drift_method
+		dataType: string
+		lineageTag: 1d363ddd-f945-4eee-9858-89b40e491288
+		summarizeBy: none
+		sourceColumn: drift_method
+
+		annotation SummarizationSetBy = Automatic
+
+	column drift_threshold
+		dataType: double
+		lineageTag: 71309bda-ade2-4f9a-aa76-e6de1d38c95a
+		summarizeBy: sum
+		sourceColumn: drift_threshold
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
+
+	column drift_detected
+		dataType: boolean
+		formatString: """TRUE"";""TRUE"";""FALSE"""
+		lineageTag: 64d03730-2897-428c-ae8f-6d65c513d67d
+		summarizeBy: none
+		sourceColumn: drift_detected
+
+		annotation SummarizationSetBy = Automatic
+
+	column source_max_date
+		dataType: dateTime
+		formatString: Long Date
+		lineageTag: 9202f4d9-3ec6-4268-9933-7bbd0075ece6
+		summarizeBy: none
+		sourceColumn: source_max_date
+
+		variation Variación
+			isDefault
+			relationship: f78eeea0-2535-47a0-9adf-505d7bfc8d5b
+			defaultHierarchy: LocalDateTable_4727e206-ae7f-4994-8062-28574252292d.'Jerarquía de fechas'
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation UnderlyingDateTimeDataType = Date
+
+	column reference_start
+		dataType: dateTime
+		formatString: Long Date
+		lineageTag: 56eab292-8d01-4df7-b4a8-1d5ca3c679d6
+		summarizeBy: none
+		sourceColumn: reference_start
+
+		variation Variación
+			isDefault
+			relationship: 65755f22-6497-4934-b56f-82ce5499fb32
+			defaultHierarchy: LocalDateTable_16efe80a-67ee-45df-bb12-a1ed83e21612.'Jerarquía de fechas'
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation UnderlyingDateTimeDataType = Date
+
+	column reference_end
+		dataType: dateTime
+		formatString: Long Date
+		lineageTag: 73496ce3-cece-479e-aa06-1502b85086f6
+		summarizeBy: none
+		sourceColumn: reference_end
+
+		variation Variación
+			isDefault
+			relationship: 7e9044e5-9530-4879-8479-968ab0e5e008
+			defaultHierarchy: LocalDateTable_4365a585-b1cb-450e-939f-a0783c67424c.'Jerarquía de fechas'
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation UnderlyingDateTimeDataType = Date
+
+	column current_start
+		dataType: dateTime
+		formatString: Long Date
+		lineageTag: 975b5262-906b-40cb-b48d-23e25ee85aed
+		summarizeBy: none
+		sourceColumn: current_start
+
+		variation Variación
+			isDefault
+			relationship: 96417adf-5d8e-4cfb-b442-a43022309161
+			defaultHierarchy: LocalDateTable_1347c866-8470-4737-90f8-ad9466fa221e.'Jerarquía de fechas'
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation UnderlyingDateTimeDataType = Date
+
+	column current_end
+		dataType: dateTime
+		formatString: Long Date
+		lineageTag: fc3d0358-3d82-4ed0-85c1-0c5ed06b9d83
+		summarizeBy: none
+		sourceColumn: current_end
+
+		variation Variación
+			isDefault
+			relationship: 5c800594-f74e-4ae0-b15a-e2ef40365751
+			defaultHierarchy: LocalDateTable_80a4290e-5bf1-48ca-9737-3965eef93eb9.'Jerarquía de fechas'
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation UnderlyingDateTimeDataType = Date
+
+	column window_days
+		dataType: int64
+		formatString: 0
+		lineageTag: 034a8924-ffbe-41f3-9459-0c10b27c0b5b
+		summarizeBy: sum
+		sourceColumn: window_days
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Estado Feature Drift' =
+			
+			IF(
+			    drift_features_history[drift_detected],
+			    "Con drift",
+			    "Sin drift"
+			)
+		lineageTag: d6e24258-90f7-4ce6-a7a7-b0589292e2c3
+		summarizeBy: none
+
+		annotation SummarizationSetBy = Automatic
+
+	partition drift_features_history = m
+		mode: import
+		source =
+				let
+				    Origen = Csv.Document(
+				    File.Contents(RutaDatosBI & "\drift_features_history.csv"),
+				    [
+				        Delimiter=",",
+				        Columns=13,
+				        Encoding=65001,
+				        QuoteStyle=QuoteStyle.None
+				    ]
+				),
+				    #"Encabezados promovidos" = Table.PromoteHeaders(Origen, [PromoteAllScalars=true]),
+				    #"Tipo cambiado con configuración regional" = Table.TransformColumnTypes(#"Encabezados promovidos", {{"drift_score", type number}, {"drift_threshold", type number}}, "en-US"),
+				    #"Tipo cambiado" = Table.TransformColumnTypes(#"Tipo cambiado con configuración regional",{{"evaluated_at_utc", type datetimezone}, {"drift_detected", type logical}, {"source_max_date", type date}, {"reference_start", type date}, {"reference_end", type date}, {"current_start", type date}, {"current_end", type date}, {"window_days", Int64.Type}})
+				in
+				    #"Tipo cambiado"
+
+	annotation PBI_NavigationStepName = Navegación
+
+	annotation PBI_ResultType = Table
+

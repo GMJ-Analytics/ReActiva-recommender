@@ -2,12 +2,20 @@ table DimFecha
 	lineageTag: 6b58b10b-01b8-460e-aea6-f7361c0aba38
 
 	column date
-		dataType: string
+		dataType: dateTime
+		formatString: Long Date
 		lineageTag: d94855f4-7b76-467a-aed7-2ea25e058639
 		summarizeBy: none
 		sourceColumn: date
 
+		variation Variación
+			isDefault
+			relationship: e97ee298-e798-4b08-b216-9ab5d216b030
+			defaultHierarchy: LocalDateTable_bfe2907f-e45e-42d2-a30e-d96145aab140.'Jerarquía de fechas'
+
 		annotation SummarizationSetBy = Automatic
+
+		annotation UnderlyingDateTimeDataType = Date
 
 	column day_name
 		dataType: string
@@ -21,9 +29,10 @@ table DimFecha
 		annotation SummarizationSetBy = Automatic
 
 	column day
-		dataType: string
+		dataType: int64
+		formatString: 0
 		lineageTag: a33bcbae-7840-4b0a-bd23-7751fcd82261
-		summarizeBy: none
+		summarizeBy: sum
 		sourceColumn: day
 
 		annotation SummarizationSetBy = Automatic
@@ -40,25 +49,28 @@ table DimFecha
 		annotation SummarizationSetBy = Automatic
 
 	column month_number
-		dataType: string
+		dataType: int64
+		formatString: 0
 		lineageTag: 7264905f-738f-4640-8973-37eaa1de08c3
-		summarizeBy: none
+		summarizeBy: sum
 		sourceColumn: month_number
 
 		annotation SummarizationSetBy = Automatic
 
 	column year
-		dataType: string
+		dataType: int64
+		formatString: 0
 		lineageTag: d48df665-b5c8-45ec-b3c5-b29981a42298
-		summarizeBy: none
+		summarizeBy: sum
 		sourceColumn: year
 
 		annotation SummarizationSetBy = Automatic
 
 	column day_of_week_number
-		dataType: string
+		dataType: int64
+		formatString: 0
 		lineageTag: 21655f50-41bd-462b-a653-3c3a52c6a7b4
-		summarizeBy: none
+		summarizeBy: sum
 		sourceColumn: day_of_week_number
 
 		annotation SummarizationSetBy = Automatic
@@ -79,14 +91,6 @@ table DimFecha
 
 		annotation SummarizationSetBy = Automatic
 
-	column year_month
-		dataType: string
-		lineageTag: 4cd3b8c9-9797-4ad1-aa4c-d445c25e4062
-		summarizeBy: none
-		sourceColumn: year_month
-
-		annotation SummarizationSetBy = Automatic
-
 	partition DimFecha = m
 		mode: import
 		source =
@@ -94,11 +98,9 @@ table DimFecha
 				    Origen = Csv.Document(File.Contents(RutaDatosBI & "\bi_calendar.csv"), [Delimiter=",", Columns=10, Encoding=65001, QuoteStyle=QuoteStyle.None]),
 				    #"Encabezados promovidos" = Table.PromoteHeaders(Origen, [PromoteAllScalars=true]),
 				    #"Tipo cambiado" = Table.TransformColumnTypes(#"Encabezados promovidos",{{"date", type date}, {"year", Int64.Type}, {"quarter", type text}, {"month_number", Int64.Type}, {"month_name", type text}, {"year_month", type date}, {"day", Int64.Type}, {"day_of_week_number", Int64.Type}, {"day_name", type text}, {"season", type text}}),
-				    #"Columnas quitadas" = Table.RemoveColumns(#"Tipo cambiado",{"year_month"}),
-				    #"Columnas reordenadas" = Csv.Document(File.Contents(RutaDatosBI & "\bi_calendar.csv"), [Delimiter=",", Columns=10, Encoding=65001, QuoteStyle=QuoteStyle.None]),
-				    #"Encabezados promovidos1" = Table.PromoteHeaders(#"Columnas reordenadas", [PromoteAllScalars=true])
+				    #"Columnas quitadas" = Table.RemoveColumns(#"Tipo cambiado",{"year_month"})
 				in
-				    #"Encabezados promovidos1"
+				    #"Columnas quitadas"
 
 	annotation PBI_NavigationStepName = Navegación
 
