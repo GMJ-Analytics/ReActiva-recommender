@@ -40,3 +40,4 @@ Thumbs.db
 # Power BI Desktop - archivos locales
 **/.pbi/localSettings.json
 **/.pbi/cache.abf
+artifacts/monitoring/

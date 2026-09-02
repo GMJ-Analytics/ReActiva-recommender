@@ -47,6 +47,10 @@ artifacts/AwsLambda/*
 !artifacts/AwsLambda/unsubscribe/
 !artifacts/AwsLambda/unsubscribe/**
 
+# Allow Evidently drift monitoring Lambda
+!artifacts/AwsLambda/evidently_drift/
+!artifacts/AwsLambda/evidently_drift/**
+
 # Operating system files
 .DS_Store
 Thumbs.db
