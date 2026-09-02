@@ -64,6 +64,14 @@ Actualmente dispone de componentes funcionales de preparación y validación de 
 
 La configuración sensible de infraestructura —credenciales, identidades de Amazon SES, URLs públicas y secretos de firma— se mantiene fuera del código y se administra mediante la configuración correspondiente en AWS.
 
+### Demo interactiva de Streamlit
+
+La aplicación operativa de ReActiva se encuentra disponible en:
+
+👉 [Abrir ReActiva en Streamlit](http://54.198.111.83:8501/)
+
+La configuración sensible de infraestructura —credenciales, identidades de Amazon SES, URLs públicas y secretos de firma— se mantiene fuera del código y se administra mediante la configuración correspondiente en AWS.
+
 ### Estado actual del desarrollo
 
 El archivo `pyproject.toml` se utiliza para definir el paquete `reactiva` bajo la estructura `src/`.
