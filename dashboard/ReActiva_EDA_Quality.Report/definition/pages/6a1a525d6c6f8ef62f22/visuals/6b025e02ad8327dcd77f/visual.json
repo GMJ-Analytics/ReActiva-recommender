@@ -4,10 +4,10 @@
   "position": {
     "x": 627.9523497840031,
     "y": 177.34677313784528,
-    "z": 6,
+    "z": 5000,
     "height": 497.65676135619844,
     "width": 627.9523497840031,
-    "tabOrder": 6
+    "tabOrder": 5000
   },
   "visual": {
     "visualType": "barChart",
@@ -456,20 +456,6 @@
             }
           ]
         }
-      },
-      {
-        "name": "ffa0993bffe66eba2e14",
-        "field": {
-          "Measure": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "FactTransacciones"
-              }
-            },
-            "Property": "Total Transacciones"
-          }
-        },
-        "type": "Advanced"
       }
     ]
   }

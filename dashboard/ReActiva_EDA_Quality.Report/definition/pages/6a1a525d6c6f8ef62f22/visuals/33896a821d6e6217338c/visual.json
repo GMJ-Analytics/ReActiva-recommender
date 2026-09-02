@@ -4,10 +4,10 @@
   "position": {
     "x": 1255.9046995680062,
     "y": 177.34677313784528,
-    "z": 7,
+    "z": 6000,
     "height": 497.65676135619844,
     "width": 627.9523497840031,
-    "tabOrder": 7
+    "tabOrder": 6000
   },
   "visual": {
     "visualType": "barChart",
@@ -361,20 +361,6 @@
   },
   "filterConfig": {
     "filters": [
-      {
-        "name": "cb21eb172008cd65e35a",
-        "field": {
-          "Measure": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "FactTransacciones"
-              }
-            },
-            "Property": "Total Transacciones"
-          }
-        },
-        "type": "Advanced"
-      },
       {
         "name": "cc868d7ce910a6008aa5",
         "field": {

@@ -4,10 +4,10 @@
   "position": {
     "x": 76.0057599162194,
     "y": 675.00353449404372,
-    "z": 8,
+    "z": 7000,
     "height": 387.26744338264172,
     "width": 551.9465898677837,
-    "tabOrder": 8
+    "tabOrder": 7000
   },
   "visual": {
     "visualType": "donutChart",
@@ -215,9 +215,8 @@
               "solid": {
                 "color": {
                   "expr": {
-                    "ThemeDataColor": {
-                      "ColorId": 2,
-                      "Percent": -0.25
+                    "Literal": {
+                      "Value": "'#2F80ED'"
                     }
                   }
                 }
@@ -243,6 +242,47 @@
                     "Right": {
                       "Literal": {
                         "Value": "'Activo'"
+                      }
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "properties": {
+            "fill": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#C0392B'"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "selector": {
+            "data": [
+              {
+                "scopeId": {
+                  "Comparison": {
+                    "ComparisonKind": 0,
+                    "Left": {
+                      "Column": {
+                        "Expression": {
+                          "SourceRef": {
+                            "Entity": "DimCliente"
+                          }
+                        },
+                        "Property": "activity_status"
+                      }
+                    },
+                    "Right": {
+                      "Literal": {
+                        "Value": "'Inactivo 270+ days'"
                       }
                     }
                   }
@@ -331,9 +371,8 @@
               "solid": {
                 "color": {
                   "expr": {
-                    "ThemeDataColor": {
-                      "ColorId": 1,
-                      "Percent": 0
+                    "Literal": {
+                      "Value": "'#1F2937'"
                     }
                   }
                 }
@@ -370,6 +409,32 @@
               "expr": {
                 "Literal": {
                   "Value": "false"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "image": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "centerBackground": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
                 }
               }
             }

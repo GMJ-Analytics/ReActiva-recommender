@@ -1,158 +1,59 @@
 # Solución de problemas
 
-En esta carpeta se documentarán los problemas encontrados durante el desarrollo del proyecto.
+Este documento registra problemas técnicos relevantes encontrados durante el desarrollo de ReActiva, junto con su causa, la solución aplicada, el resultado y una medida preventiva.
 
-Cada registro deberá incluir:
+Cada registro mantiene la estructura:
 
 - Fecha
-
 - Contexto
-
 - Problema
-
 - Causa
-
 - Solución aplicada
-
 - Resultado
-
 - Prevención
+
+El objetivo es conservar decisiones y aprendizajes técnicos sin mezclar en el README principal estados históricos u opciones que ya no forman parte de la arquitectura vigente.
+
+---
 
 ## 2026-08-12 - PR con cambios de una tarea anterior
 
 ### Contexto
 
-Durante la revisión del PR #3 se detectó que la branch utilizada contenía código previo de Streamlit que el equipo había decidido no integrar al proyecto en esa instancia.
+Durante la revisión de un Pull Request se detectó que la branch utilizada contenía código de una tarea anterior que el equipo había decidido no integrar.
 
 ### Problema
 
-El Pull Request incluía cambios que no correspondían al trabajo actual y que podían incorporarse accidentalmente a `main`.
+El PR incluía cambios ajenos a la tarea actual y existía riesgo de incorporarlos accidentalmente a `main`.
 
 ### Causa
 
-Se reutilizó una branch existente para trabajos distintos en lugar de crear una nueva branch desde `main` actualizado para cada tarea.
+Se reutilizó una branch previa en lugar de comenzar la nueva tarea desde `main` actualizado.
 
 ### Solución aplicada
 
-Se revisó el diff del PR antes de aprobarlo, se decidió cerrarlo sin realizar el merge y se eliminó la branch asociada.
+Se revisó el diff antes del merge, se cerró el PR sin integrarlo y se descartó la branch correspondiente.
 
 ### Resultado
 
-El código no deseado no fue incorporado a `main` y el repositorio mantuvo la versión acordada por el equipo.
+El código no deseado no llegó a `main`.
 
 ### Prevención
 
-A partir de este caso se refuerza el flujo de trabajo:
+Mantener el flujo:
 
-`Issue -> branch propia desde main actualizado -> desarrollo -> Pull Request -> revisión -> merge -> eliminación de la branch`
+```text
+Issue
+→ main actualizado
+→ branch propia
+→ desarrollo
+→ Pull Request
+→ revisión
+→ merge
+→ eliminación de branch
+```
 
-Cada nueva tarea debe trabajarse en una branch independiente para evitar arrastrar cambios de trabajos anteriores.
-
----
-
-## 2026-08-18 - Archivo de origen en S3 incompatible con su extensión
-
-### Contexto
-
-Durante la preparación de datos de la Issue #28 se intentó cargar el dataset principal desde AWS S3 mediante la función `cargar_datos()`.
-
-### Problema
-
-La lectura del archivo fallaba con un error de decodificación al intentar procesarlo como CSV.
-
-### Causa
-
-El objeto almacenado en S3 no correspondía correctamente al formato indicado por su extensión `.csv`. El contenido presentaba una estructura incompatible con un CSV válido para el flujo de carga del proyecto.
-
-### Solución aplicada
-
-Se corrigió el archivo almacenado en S3 y se volvió a ejecutar la carga mediante `cargar_datos()`.
-
-### Resultado
-
-El dataset pudo cargarse correctamente con:
-
-- 10.000 filas.
-
-- 27 columnas.
-
-- 3.291 clientes únicos.
-
-- `Customer Full Name` presente.
-
-- `Customer Email` presente.
-
-- `Frequency of Purchases` ausente.
-
-La carga quedó nuevamente operativa para auditoría, validación, EDA y preparación de datos.
-
-### Prevención
-
-Después de reemplazar o actualizar un dataset en S3 se debe realizar una validación mínima de carga antes de continuar con el pipeline:
-
-- confirmar que la extensión coincida con el formato real del archivo;
-
-- verificar que el archivo pueda abrirse mediante la función de carga oficial del proyecto;
-
-- comprobar dimensiones y columnas esperadas;
-
-- evitar continuar con auditoría o modelado hasta validar correctamente la fuente.
-
----
-
-## 2026-08-18 - Eliminación incorrecta de transacciones legítimas por deduplicación
-
-### Contexto
-
-Durante la validación de la limpieza reproducible de datos de la Issue #28 se revisó la regla utilizada para detectar transacciones duplicadas.
-
-### Problema
-
-La lógica inicial utilizaba como clave:
-
-`Customer ID + Item Purchased + Purchase Date`
-
-Con esa combinación podían identificarse como duplicadas compras legítimas realizadas por un mismo cliente sobre el mismo producto y fecha.
-
-Posteriormente se incorporó `Transaction ID` dentro de una clave compuesta, pero durante la revisión final se determinó que la identidad transaccional debía depender directamente de `Transaction ID`.
-
-### Causa
-
-`Transaction ID` es el identificador único de una operación.
-
-Dos registros que tengan diferentes `Transaction ID` representan transacciones distintas aunque coincidan en cliente, producto y fecha.
-
-Por el contrario, dos registros distintos que compartan el mismo `Transaction ID` representan un conflicto de integridad y no deben resolverse silenciosamente eliminando una de las filas.
-
-### Solución aplicada
-
-La validación quedó basada en:
-
-`Transaction ID`
-
-como identidad única de la operación.
-
-La clave `duplicate_key_rows` se mantiene en el reporte por compatibilidad con los consumidores existentes, pero actualmente representa la cantidad de `Transaction ID` duplicados.
-
-La limpieza conserva la eliminación de filas completamente idénticas, pero no elimina silenciosamente conflictos donde un mismo `Transaction ID` identifica registros diferentes.
-
-### Resultado
-
-Dos compras del mismo cliente, producto y fecha con distintos `Transaction ID` permanecen como transacciones independientes.
-
-Un `Transaction ID` repetido se considera un problema de integridad que debe ser corregido antes de continuar.
-
-### Prevención
-
-Toda modificación futura de la lógica de deduplicación debe validar al menos:
-
-- `Transaction ID` vacío;
-
-- `Transaction ID` duplicado;
-
-- compras con mismo cliente, producto y fecha pero distintos `Transaction ID`;
-
-- registros diferentes asociados al mismo `Transaction ID`.
+No reutilizar branches de tareas anteriores.
 
 ---
 
@@ -160,101 +61,150 @@ Toda modificación futura de la lógica de deduplicación debe validar al menos:
 
 ### Contexto
 
-Durante la actualización del entorno del proyecto se revisó el archivo `requirements.txt` utilizado para instalar las dependencias compartidas por los integrantes del equipo.
+Durante la preparación del entorno compartido se revisó el `requirements.txt` canónico.
 
 ### Problema
 
-El archivo presentaba dos inconvenientes que afectaban su utilización confiable:
-
-- estaba almacenado con codificación UTF-16 en lugar de UTF-8;
-
-- las versiones de algunas dependencias relacionadas con AWS requerían ser compatibilizadas.
-
-La codificación provocaba que distintas herramientas interpretaran incorrectamente el archivo y dificultaba su revisión normal desde Git.
-
-La combinación de dependencias AWS también debía quedar validada para evitar conflictos durante la instalación del entorno.
+El archivo se encontraba en UTF-16 y existían versiones AWS que debían mantenerse compatibles entre sí.
 
 ### Causa
 
-El archivo había sido generado o guardado previamente utilizando una codificación diferente a la utilizada normalmente por los archivos de texto del repositorio.
-
-Además, paquetes relacionados con AWS poseen dependencias entre sí y sus versiones no pueden seleccionarse de forma completamente independiente.
-
-Entre los paquetes involucrados se encontraban:
-
-- `aiobotocore`;
-
-- `boto3`;
-
-- `botocore`;
-
-- `s3fs`;
-
-- `fsspec`.
+El archivo había sido guardado con una codificación distinta de UTF-8 y las dependencias AWS poseen restricciones cruzadas.
 
 ### Solución aplicada
 
-Se normalizó `requirements.txt` a codificación UTF-8.
+Se normalizó `requirements.txt` a UTF-8 y se validó el conjunto de dependencias relacionadas con AWS.
 
-También se ajustaron y validaron las versiones relacionadas con AWS.
-
-La combinación validada incluyó:
+Entre las versiones comprobadas se encontraron:
 
 ```text
-
 aiobotocore==3.9.0
-
 boto3==1.43.56
-
 botocore==1.43.56
-
 s3fs==2026.7.0
-
 fsspec==2026.7.0
-
 ```
-
-Posteriormente se ejecutaron nuevamente los controles de instalación y consistencia del entorno.
 
 ### Resultado
 
-El archivo `requirements.txt` quedó correctamente interpretable como archivo de texto UTF-8 y pudo utilizarse como fuente reproducible de dependencias.
+`requirements.txt` volvió a ser interpretable normalmente por Git y por las herramientas de instalación.
 
-La validación mediante:
+La comprobación:
 
 ```bash
-
 python -m pip check
-
 ```
 
 finalizó sin dependencias rotas.
 
-La configuración AWS quedó operativa con las versiones establecidas.
+### Prevención
+
+Mantener `requirements.txt` en UTF-8 y, después de modificar dependencias, ejecutar:
+
+```bash
+python -m pip install -r requirements.txt
+python -m pip check
+```
+
+Las dependencias AWS deben revisarse de forma conjunta.
+
+---
+
+## 2026-08-18 - Archivo de origen en S3 incompatible con su extensión
+
+### Contexto
+
+Durante la preparación de datos se intentó cargar el dataset principal desde Amazon S3.
+
+### Problema
+
+La lectura fallaba con un error de decodificación al tratar el objeto como CSV.
+
+### Causa
+
+El contenido almacenado no era compatible con el formato indicado por la extensión `.csv`.
+
+### Solución aplicada
+
+Se reemplazó/corrigió el objeto almacenado en S3 y se validó nuevamente mediante la función oficial de carga.
+
+### Resultado
+
+El dataset volvió a quedar disponible para auditoría, validación, EDA y modelado.
+
+En esa etapa se verificaron:
+
+- 10.000 filas;
+- 3.291 clientes únicos;
+- `Customer Full Name` presente;
+- `Customer Email` presente;
+- `Frequency of Purchases` ausente.
+
+Posteriormente el esquema canónico evolucionó hasta las 28 columnas vigentes con incorporación de `Customer Phone`.
 
 ### Prevención
 
-El archivo `requirements.txt` debe mantenerse en UTF-8.
+Después de reemplazar un dataset en S3:
 
-Después de modificar dependencias se recomienda ejecutar:
+- comprobar formato real y extensión;
+- validar lectura con la función oficial;
+- revisar dimensiones y columnas;
+- no continuar con el pipeline si la fuente no fue validada.
 
-```bash
+---
 
-python -m pip install -r requirements.txt
+## 2026-08-18 - Eliminación incorrecta de transacciones legítimas por deduplicación
 
+### Contexto
+
+Se revisó la lógica de limpieza utilizada para detectar duplicados.
+
+### Problema
+
+Una clave basada en:
+
+```text
+Customer ID + Item Purchased + Purchase Date
 ```
 
-y posteriormente:
+podía eliminar compras legítimas realizadas por el mismo cliente sobre el mismo producto y fecha.
 
-```bash
+### Causa
 
-python -m pip check
+La identidad única de una operación es:
 
+```text
+Transaction ID
 ```
 
-Cuando se actualicen paquetes relacionados con AWS, deben revisarse conjuntamente las restricciones de compatibilidad entre `aiobotocore`, `boto3`, `botocore`, `s3fs` y `fsspec`.
+Dos operaciones pueden coincidir en cliente, producto y fecha y seguir siendo transacciones diferentes.
 
-También debe evitarse reemplazar versiones ya validadas sin comprobar nuevamente la instalación completa del entorno.
+### Solución aplicada
+
+La validación del dataset pasó a considerar `Transaction ID` como identidad transaccional.
+
+La clave histórica:
+
+```text
+duplicate_key_rows
+```
+
+se conservó por compatibilidad, pero representa duplicados de `Transaction ID`.
+
+Los registros completamente idénticos pueden limpiarse como duplicados exactos, mientras que una colisión de `Transaction ID` debe tratarse como un problema de integridad.
+
+### Resultado
+
+Las compras legítimas con distintos `Transaction ID` dejaron de eliminarse incorrectamente.
+
+### Prevención
+
+Toda modificación futura de deduplicación debe comprobar:
+
+- `Transaction ID` vacío;
+- `Transaction ID` repetido;
+- mismo cliente/producto/fecha con IDs distintos;
+- registros distintos con el mismo ID.
 
 ---
 
@@ -262,133 +212,53 @@ También debe evitarse reemplazar versiones ya validadas sin comprobar nuevament
 
 ### Contexto
 
-Durante la integración de los cambios de modelado, Streamlit, Docker y contexto correspondientes a la Issue #47 se revisó cómo los diferentes componentes consumían las dependencias y la lógica de recomendación.
+Durante la integración de Streamlit, Docker y modelado se encontraron implementaciones duplicadas.
 
 ### Problema
 
-Existían implementaciones duplicadas en diferentes ubicaciones del repositorio:
+Existían:
 
 ```text
-
 requirements.txt
-
 app/requirements.txt
-
 ```
 
-y:
+y también:
 
 ```text
-
 app/recommender.py
-
 src/reactiva/recommender/recommender.py
-
 ```
 
-Mantener dos archivos de dependencias y dos implementaciones del recomendador generaba el riesgo de que Streamlit, Docker y los módulos de `src/reactiva` terminaran ejecutando versiones diferentes de la misma lógica.
-
-Una modificación realizada sobre una copia podía no propagarse a la otra.
+Esto podía hacer que distintos componentes ejecutaran versiones diferentes.
 
 ### Causa
 
-Durante las primeras etapas del proyecto se fueron incorporando componentes de forma independiente.
-
-Streamlit disponía de archivos propios dentro de `app/`, mientras que la arquitectura general del proyecto ya había definido `src/reactiva/` como ubicación para la lógica reutilizable.
-
-Al avanzar la integración, ambas estructuras comenzaron a superponerse.
+Los componentes habían evolucionado inicialmente de forma independiente.
 
 ### Solución aplicada
 
-Se definió:
+Se dejó como fuente canónica de dependencias:
 
 ```text
-
 requirements.txt
-
 ```
 
-ubicado en la raíz del repositorio como archivo canónico de dependencias.
-
-Se eliminó:
+en la raíz, y como fuente canónica de recomendación:
 
 ```text
-
-app/requirements.txt
-
-```
-
-También se definió:
-
-```text
-
 src/reactiva/recommender/recommender.py
-
 ```
 
-como implementación canónica del recomendador.
-
-Se eliminó:
-
-```text
-
-app/recommender.py
-
-```
-
-Streamlit y Docker fueron actualizados para consumir directamente la implementación ubicada dentro de `src/reactiva`.
+Los consumidores fueron actualizados para utilizar esas implementaciones.
 
 ### Resultado
 
-El proyecto quedó con una única fuente de dependencias y una única implementación reutilizable del recomendador.
-
-Actualmente:
-
-```text
-
-requirements.txt
-
-```
-
-es utilizado por el entorno local y Docker.
-
-Y:
-
-```text
-
-src/reactiva/recommender/recommender.py
-
-```
-
-es utilizado como fuente principal de la lógica de recomendación.
-
-Esto reduce el riesgo de divergencias entre ejecución local, Streamlit, Docker y futuros componentes del proyecto.
-
-La suite completa fue ejecutada después de la integración y registró:
-
-```text
-
-19 passed
-
-```
-
-Además:
-
-```bash
-
-python -m pip check
-
-```
-
-finalizó sin dependencias rotas.
+El proyecto quedó con una única fuente reutilizable para dependencias y recomendación.
 
 ### Prevención
 
-Antes de crear una nueva implementación de una función existente debe verificarse si esa responsabilidad ya se encuentra implementada dentro de `src/reactiva`.
-
-La lógica reutilizable debe permanecer dentro del paquete canónico y los consumidores, como Streamlit, notebooks o futuras APIs, deben importarla en lugar de mantener copias independientes.
-
-De la misma manera, las dependencias comunes del proyecto deben mantenerse en un único archivo canónico mientras no exista una necesidad técnica explícita y documentada de separar entornos.
+Antes de crear una nueva implementación, comprobar si esa responsabilidad ya existe en `src/reactiva`.
 
 ---
 
@@ -396,83 +266,29 @@ De la misma manera, las dependencias comunes del proyecto deben mantenerse en un
 
 ### Contexto
 
-Durante la validación de Docker realizada como parte de la integración de la Issue #47 se revisó el comando utilizado para iniciar la aplicación dentro del contenedor.
-
-El proyecto contiene dependencias relacionadas con una futura API, incluyendo `Uvicorn`, pero la aplicación actualmente implementada en:
-
-```text
-
-app/app.py
-
-```
-
-es una aplicación Streamlit.
+La aplicación interactiva existente es Streamlit, aunque el entorno contenía dependencias relacionadas con una futura API.
 
 ### Problema
 
-La existencia de dependencias asociadas a FastAPI/Uvicorn podía llevar a configurar el contenedor como si `app.py` correspondiera a una aplicación ASGI.
-
-Sin embargo, el runtime actual del proyecto es Streamlit.
-
-Utilizar un servidor ASGI para iniciar este archivo no representa correctamente el tipo de aplicación existente y evita disponer de una configuración Docker coherente con la ejecución real del proyecto.
+Existía riesgo de iniciar `app.py` como si fuera una aplicación ASGI mediante Uvicorn.
 
 ### Causa
 
-La arquitectura prevista contempla una futura capa de API, mientras que la interfaz desarrollada actualmente utiliza Streamlit.
-
-Durante la evolución del proyecto coexistieron dependencias correspondientes a ambas etapas, aunque la API todavía no constituye el punto de entrada actual de la aplicación.
+Coexistían dependencias de etapas diferentes del proyecto.
 
 ### Solución aplicada
 
-Se configuró el `Dockerfile` para iniciar explícitamente Streamlit mediante:
-
-```text
-
-streamlit run app.py --server.address=0.0.0.0 --server.port=8501
-
-```
-
-También se definió:
-
-```dockerfile
-
-EXPOSE 8501
-
-```
-
-`Uvicorn` se mantuvo como dependencia disponible para la futura implementación de una API, pero dejó de considerarse el runtime correspondiente a `app.py`.
+El Dockerfile de la aplicación quedó configurado para ejecutar Streamlit sobre el puerto 8501.
 
 ### Resultado
 
-La imagen Docker pudo construirse correctamente desde la raíz del repositorio.
-
-Se validó la ejecución del contenedor utilizando variables de entorno y credenciales AWS suministradas externamente.
-
-Streamlit quedó accesible desde:
-
-```text
-
-http\://localhost:8501
-
-```
-
-El contenedor utiliza además el `requirements.txt` canónico y la implementación del paquete `reactiva` ubicada dentro de `src/reactiva`.
+La aplicación pudo ejecutarse de forma coherente con su framework real.
 
 ### Prevención
 
-El comando de inicio de un contenedor debe corresponder al framework que realmente implementa el entrypoint utilizado.
+El runtime de un contenedor debe corresponder al entrypoint realmente implementado.
 
-Para el estado actual del proyecto:
-
-```text
-
-app.py -> Streamlit -> puerto 8501
-
-```
-
-Una futura implementación de FastAPI deberá disponer de su propio módulo o entrypoint claramente identificado.
-
-La incorporación futura de una API no debe reemplazar accidentalmente el runtime de Streamlit mientras ambos componentes continúen cumpliendo responsabilidades diferentes.
+Una futura API debe disponer de su propio módulo y no reemplazar accidentalmente el runtime de Streamlit.
 
 ---
 
@@ -480,193 +296,129 @@ La incorporación futura de una API no debe reemplazar accidentalmente el runtim
 
 ### Contexto
 
-Durante el desarrollo del dashboard de la Issue #61 se detectó que las consultas del proyecto Power BI almacenaban directamente la ruta absoluta de la computadora utilizada para crearlo.
+Las consultas iniciales del proyecto Power BI apuntaban directamente a rutas de la computadora donde se creó el dashboard.
 
 ### Problema
 
-Las seis consultas principales contenían rutas similares a:
-
-`C:\Users\\\<usuario>\\...\ReActiva-recommender\dashboard\data\archivo.csv`
-
-Esto impedía que otro integrante pudiera abrir y actualizar el dashboard desde una ubicación diferente sin modificar individualmente cada consulta.
+Otro integrante no podía abrir y refrescar el proyecto desde otra ubicación sin editar múltiples consultas.
 
 ### Causa
 
-Power BI generó automáticamente referencias absolutas al utilizar archivos CSV locales como origen de datos.
+Power BI creó referencias absolutas al importar CSV locales.
 
 ### Solución aplicada
 
-Se creó en Power Query el parámetro:
-
-`RutaDatosBI`
-
-Las seis consultas utilizan ahora ese único parámetro como ruta base:
-
-- `FactTransacciones`
-
-- `DimFecha`
-
-- `DimCliente`
-
-- `DimProducto`
-
-- `CalidadResumen`
-
-- `CalidadColumnas`
-
-Cada archivo se resuelve a partir del parámetro, por ejemplo:
-
-`RutaDatosBI & "\bi_transactions.csv"`
-
-### Resultado
-
-La ruta local quedó centralizada en un único punto. Al utilizar el proyecto desde otra computadora solamente es necesario modificar `RutaDatosBI` para que apunte a la carpeta local `dashboard/data`.
-
-### Prevención
-
-Toda nueva fuente local utilizada por Power BI debe depender de un parámetro de ruta y no incorporar directamente rutas absolutas dentro de cada consulta.
-
----
-
-## 2026-08-26 - Interpretación incorrecta de decimales por configuración regional en Power BI
-
-### Contexto
-
-Durante la construcción del modelo de Power BI de la Issue #61 se importaron tablas CSV generadas por Python.
-
-### Problema
-
-La detección automática de tipos de Power Query interpretó algunos valores con punto decimal utilizando una configuración regional incompatible.
-
-Por ejemplo, valores como:
-
-`6065.5`
-
-podían ser interpretados como:
-
-`60655`
-
-alterando métricas y porcentajes del dashboard.
-
-### Causa
-
-Los CSV utilizan el punto (`.`) como separador decimal, mientras que la configuración regional utilizada por Power BI esperaba otra representación numérica.
-
-### Solución aplicada
-
-En las consultas afectadas se evitó la detección automática de tipos y los campos numéricos necesarios se convirtieron explícitamente utilizando una configuración regional compatible con el formato del CSV.
-
-### Resultado
-
-Los valores decimales y porcentajes quedaron correctamente interpretados en el modelo y las métricas del dashboard recuperaron sus valores esperados.
-
-### Prevención
-
-Al importar CSV generados por Python en Power BI:
-
-- evitar depender únicamente de la detección automática de tipos;
-
-- validar manualmente métricas decimales después de la importación;
-
-- utilizar conversión de tipo con configuración regional explícita cuando el archivo utilice punto decimal.
-
----
-
-## 2026-08-28 - Incompatibilidad entre el nuevo modelo de reactivación y Streamlit
-
-### Contexto
-
-Después de integrar a `main` la nueva implementación del recomendador basada en Gradient Boosting para clientes inactivos, se actualizó la rama de Streamlit con los cambios más recientes del repositorio.
-
-La aplicación Streamlit también genera recomendaciones comerciales durante las ventas realizadas en el punto de venta.
-
-### Problema
-
-Streamlit continuaba importando y utilizando:
-
-```python
-
-build_customer_similarity()
-
-```
-
-para generar recomendaciones mediante similitud Customer-Customer.
-
-Esta lógica había quedado obsoleta respecto de la arquitectura vigente del recomendador.
-
-### Causa
-
-La similitud cliente-cliente correspondía a una etapa anterior del desarrollo y todavía permanecía conectada al flujo de Streamlit.
-
-El modelo de reactivación ya había evolucionado hacia Gradient Boosting y el flujo operativo de venta local podía resolverse utilizando la similitud entre productos a partir del producto que el cliente está comprando.
-
-### Solución aplicada
-
-Se mantuvo sin modificaciones la implementación de Gradient Boosting utilizada para clientes inactivos.
-
-La similitud Customer-Customer fue eliminada del flujo de Streamlit.
-
-No se restauró:
-
-```python
-
-build_customer_similarity()
-
-```
-
-ni la similitud coseno entre clientes.
-
-La arquitectura vigente quedó:
+Se creó el parámetro:
 
 ```text
+RutaDatosBI
+```
 
+como ruta base para `dashboard/data`.
+
+### Resultado
+
+La ubicación local quedó centralizada en un único parámetro.
+
+### Prevención
+
+Toda nueva fuente local de Power BI debe depender de `RutaDatosBI` y no contener rutas personales hardcodeadas.
+
+---
+
+## 2026-08-26 / 2026-09-02 - Interpretación incorrecta de decimales por configuración regional en Power BI
+
+### Contexto
+
+Los CSV generados por Python utilizan punto como separador decimal.
+
+El problema volvió a ser relevante al incorporar las salidas de monitoreo de Evidently.
+
+### Problema
+
+Power Query podía interpretar valores como:
+
+```text
+6065.5
+```
+
+de forma incorrecta.
+
+En monitoreo, un valor como:
+
+```text
+0.20
+```
+
+también podía terminar interpretado de forma incompatible con la medida esperada.
+
+### Causa
+
+La configuración regional utilizada por Power BI no coincidía con el formato numérico de los CSV.
+
+### Solución aplicada
+
+Las conversiones numéricas sensibles se configuraron utilizando una configuración regional compatible con el punto decimal, particularmente `en-US` cuando correspondía.
+
+### Resultado
+
+Los importes, porcentajes y métricas de drift recuperaron sus valores correctos.
+
+### Prevención
+
+No depender únicamente de la inferencia automática de tipos de Power Query.
+
+Validar manualmente decimales y porcentajes después de incorporar una nueva fuente CSV.
+
+---
+
+## 2026-08-28 - Incompatibilidad entre el modelo de reactivación y Streamlit
+
+### Contexto
+
+El flujo de reactivación había evolucionado hacia Gradient Boosting, pero Streamlit todavía conservaba lógica Customer-Customer.
+
+### Problema
+
+Streamlit utilizaba una estrategia User-Based que ya no correspondía con la arquitectura productiva.
+
+### Causa
+
+La lógica experimental anterior permanecía conectada al flujo operativo.
+
+### Solución aplicada
+
+Se separaron las responsabilidades:
+
+```text
 Cliente inactivo >= 270 días
-
 → Gradient Boosting
-
 → recomendación de reactivación
-
 ```
 
 ```text
-
 Cliente existente Offline
-
-→ producto comprado actualmente
-
+→ producto comprado
 → Item-to-Item
-
 → recomendación
-
 ```
 
 ```text
-
 Cliente nuevo Offline
-
-→ producto comprado actualmente
-
+→ producto comprado
 → Item-to-Item
-
 → recomendación
-
 ```
 
-Las operaciones Online se registran, pero no generan recomendaciones en Streamlit.
+Las ventas Online se registran pero no generan recomendación en Streamlit.
 
 ### Resultado
 
-Streamlit utiliza Item-to-Item para las recomendaciones asociadas a ventas locales tanto de clientes existentes como nuevos.
-
-El modelo Gradient Boosting mantiene exclusivamente su responsabilidad sobre clientes inactivos.
-
-La lógica User-Based / Customer-Customer deja de formar parte del flujo productivo vigente.
+User-Based / Customer-Customer dejó de formar parte del flujo productivo de Streamlit.
 
 ### Prevención
 
-Las funciones utilizadas durante etapas experimentales no deben mantenerse en el flujo productivo únicamente por compatibilidad histórica.
-
-Antes de conservar o restaurar una función debe verificarse si continúa formando parte de la arquitectura vigente y si existe un consumidor real que todavía la necesite.
+No mantener funciones experimentales conectadas al producto únicamente por compatibilidad histórica.
 
 ---
 
@@ -674,89 +426,31 @@ Antes de conservar o restaurar una función debe verificarse si continúa forman
 
 ### Contexto
 
-Streamlit utiliza el dataset histórico canónico configurado mediante:
-
-```text
-
-DATASET_URI
-
-```
-
-para mostrar información de clientes y construir recomendaciones.
-
-La carga del dataset estaba implementada mediante:
-
-```python
-
-@st.cache_data(show_spinner='Leyendo dataset historico...')
-
-```
+Streamlit reutiliza el dataset histórico configurado mediante `DATASET_URI`.
 
 ### Problema
 
-El cache no tenía definido un tiempo de expiración.
-
-Esto permitía que una instancia de Streamlit mantuviera en memoria una versión antigua del dataset aun después de que el dataset canónico hubiera sido actualizado en S3.
+El cache no tenía expiración explícita y podía mantener una copia antigua aun después de actualizar S3.
 
 ### Causa
 
-`st.cache_data` conserva el resultado de la función mientras Streamlit considere válida la entrada cacheada.
-
-Al no existir un `ttl`, la aplicación no tenía una política explícita para volver a consultar periódicamente la fuente configurada.
+`st.cache_data` no disponía de `ttl`.
 
 ### Solución aplicada
 
-Se incorporó un tiempo de vida de una hora:
+Se configuró:
 
 ```python
-
-@st.cache_data(
-
-    ttl=3600,
-
-    show_spinner='Leyendo dataset historico...'
-
-)
-
+@st.cache_data(ttl=3600)
 ```
-
-De esta manera Streamlit puede reutilizar el dataset en memoria durante la operación normal y volver a consultar la fuente canónica una vez vencido el cache.
 
 ### Resultado
 
-La aplicación evita realizar una lectura del dataset histórico en cada interacción y, al mismo tiempo, deja de mantener indefinidamente una copia potencialmente desactualizada.
-
-La versión actual adopta deliberadamente una política de consistencia diaria:
-
-```text
-
-ventas del día
-
-→ staging
-
-→ consolidación nocturna
-
-→ dataset canónico actualizado
-
-→ recomendaciones posteriores
-
-```
-
-Las transacciones todavía presentes en staging no necesitan afectar las recomendaciones generadas durante el mismo día.
-
-La actualización en tiempo real o casi real puede incorporarse posteriormente como una mejora de escalabilidad si el caso de negocio lo requiere.
+El dataset puede reutilizarse durante una hora y luego vuelve a consultarse.
 
 ### Prevención
 
-Toda fuente remota utilizada mediante cache debe definir explícitamente:
-
-- cuándo puede considerarse válida la información cacheada;
-
-- cuándo debe releerse la fuente;
-
-- qué nivel de consistencia necesita el caso de negocio.
-
-No debe eliminarse el cache únicamente para obtener información más reciente si el sistema no requiere consistencia en tiempo real, ya que eso puede aumentar innecesariamente las lecturas contra servicios externos.
+Toda fuente remota cacheada debe definir una política explícita de vigencia coherente con la necesidad de consistencia del negocio.
 
 ---
 
@@ -764,123 +458,28 @@ No debe eliminarse el cache únicamente para obtener información más reciente 
 
 ### Contexto
 
-Streamlit permite registrar transacciones de dos formas diferentes:
-
-- ventas individuales realizadas desde el flujo de atención;
-
-- cargas masivas utilizadas para representar ventas provenientes del canal online.
-
-Ambos flujos deben persistir información en Amazon S3 antes de que las transacciones sean incorporadas al dataset histórico canónico.
+Streamlit permite registrar ventas individuales y cargas masivas Online.
 
 ### Problema
 
-La aplicación disponía de dos caminos de escritura hacia S3, pero no existía una separación suficientemente explícita entre los archivos generados por ventas individuales y los archivos correspondientes a cargas masivas.
-
-Utilizar una ubicación genérica dificultaría posteriormente:
-
-- identificar el origen de cada archivo;
-
-- aplicar reglas específicas durante la consolidación;
-
-- auditar cada tipo de ingreso;
-
-- evitar confundir una carga batch con una venta registrada individualmente.
-
-### Causa
-
-Los dos mecanismos de ingreso fueron desarrollados inicialmente como funcionalidades independientes.
-
-La arquitectura de consolidación todavía no se encontraba definida completamente y el helper de subida mantenía un prefijo genérico como valor por defecto.
+Sin separación explícita resultaba difícil auditar el origen de cada archivo y aplicar reglas distintas.
 
 ### Solución aplicada
 
-Se definieron dos rutas independientes dentro de staging:
+Se definieron:
 
 ```text
-
 staging/individual/
-
-```
-
-para las transacciones registradas individualmente desde Streamlit, y:
-
-```text
-
 staging/batch/
-
 ```
-
-para las cargas masivas.
-
-El flujo queda:
-
-```text
-
-venta individual
-
-→ validación
-
-→ objeto independiente
-
-→ staging/individual/
-
-```
-
-y:
-
-```text
-
-archivo masivo
-
-→ validación
-
-→ limpieza
-
-→ staging/batch/
-
-```
-
-La persistencia utiliza identificadores estables de la operación para evitar que una segunda ejecución accidental genere una segunda copia lógica de la misma transacción o lote.
 
 ### Resultado
 
-Las ventas individuales se almacenan bajo:
-
-```text
-
-staging/individual/
-
-```
-
-y las cargas masivas bajo:
-
-```text
-
-staging/batch/
-
-```
-
-La separación deja preparado el origen de datos para que el proceso nocturno pueda consumir ambos tipos de staging de forma controlada.
+Las fuentes quedaron diferenciadas antes de su procesamiento posterior.
 
 ### Prevención
 
-Las distintas fuentes operativas no deben escribir indiscriminadamente sobre una misma ubicación genérica cuando posteriormente requieren trazabilidad o tratamiento diferente.
-
-Toda nueva fuente de ingesta debe definir explícitamente:
-
-- origen;
-
-- prefijo de staging;
-
-- formato esperado;
-
-- estrategia de identificación única;
-
-- reglas de validación;
-
-- mecanismo de consolidación.
-
-El dataset canónico no debe modificarse directamente desde interfaces concurrentes como Streamlit mientras exista una capa de staging destinada a controlar esa integración.
+Toda nueva fuente de ingesta debe definir explícitamente su prefijo, formato, identidad, validaciones y proceso de consolidación.
 
 ---
 
@@ -888,135 +487,41 @@ El dataset canónico no debe modificarse directamente desde interfaces concurren
 
 ### Contexto
 
-Durante la revisión funcional de Streamlit se analizaron dos puntos defensivos:
-
-- la carga de archivos CSV masivos;
-
-- la visualización administrativa de logs estructurados.
-
-Ambos componentes podían funcionar correctamente en condiciones normales, pero necesitaban controles adicionales para evitar fallas frente a entradas inesperadas.
+Se revisaron defensas adicionales en el uploader CSV y en el visor administrativo de logs.
 
 ### Problema
 
-En la carga masiva, el archivo podía llegar a ser procesado por Pandas sin una validación previa de tamaño.
+Un archivo muy grande podía llegar a Pandas antes de validar tamaño.
 
-Esto implicaba que un archivo excesivamente grande pudiera consumir memoria innecesariamente antes de ejecutar las validaciones de contenido.
-
-En el visor de auditoría, el filtro por nivel asumía que todos los registros contenían una columna:
-
-```text
-
-level
-
-```
-
-con valores válidos.
-
-Además, leer indefinidamente un archivo de log completo podía generar un consumo innecesario de memoria a medida que aumentara su tamaño.
-
-### Causa
-
-Las validaciones existentes estaban orientadas principalmente a la calidad interna del dataset una vez cargado.
-
-El tamaño del archivo todavía no se verificaba antes de su lectura.
-
-Por otra parte, los logs generados actualmente incluyen normalmente el campo `level`, pero el visor administrativo no contemplaba defensivamente registros históricos o externos con esquemas incompletos ni el crecimiento continuo del archivo.
+El visor de logs suponía además que todos los registros contenían un `level` válido.
 
 ### Solución aplicada
 
-Para la carga masiva se definió un límite operativo de:
+Se definió un límite de:
 
 ```text
-
 20 MB
-
 ```
 
-El límite se aplica en dos niveles.
+en Streamlit y en la validación propia de la aplicación.
 
-A nivel del framework Streamlit se configuró:
+Para logs, los niveles ausentes o nulos se normalizan defensivamente como:
 
 ```text
-
-.streamlit/config.toml
-
-```
-
-con:
-
-```toml
-
-[server]
-
-maxUploadSize = 20
-
-```
-
-La configuración también se copia dentro de la imagen Docker mediante:
-
-```dockerfile
-
-COPY .streamlit ./.streamlit
-
-```
-
-Además, la aplicación mantiene una validación defensiva propia antes de procesar el CSV.
-
-Antes de procesar el archivo se verifica:
-
-```text
-
-archivo vacío
-
-→ rechazar
-
-```
-
-y:
-
-```text
-
-archivo > 20 MB
-
-→ rechazar
-
-```
-
-Para el visor de logs se mantiene una normalización defensiva del campo `level`.
-
-Si la columna no existe o contiene valores nulos se utiliza:
-
-```text
-
 UNKNOWN
-
 ```
 
-La lectura del visor también se mantiene acotada para evitar cargar indefinidamente un log completo en memoria.
+y la lectura se mantiene acotada.
 
 ### Resultado
 
-La carga masiva quedó protegida frente a archivos vacíos o superiores al límite operativo definido por la aplicación.
-
-El visor de auditoría quedó preparado para tolerar registros con esquemas incompletos y para limitar el volumen de información cargado simultáneamente.
+La carga masiva y el visor quedaron más resistentes a entradas inesperadas.
 
 ### Prevención
 
-Las validaciones de archivos deben diferenciar dos niveles:
+Separar validación del contenedor del archivo de validación del contenido.
 
-```text
-
-validación del contenedor
-
-→ tamaño, existencia y posibilidad de lectura
-
-validación del contenido
-
-→ esquema, tipos, nulos, duplicados, rangos y reglas de negocio
-
-```
-
-De la misma manera, las herramientas de auditoría deben tolerar registros históricos o externos parcialmente incompletos y evitar lecturas ilimitadas de archivos que pueden crecer de forma continua.
+Los visores operativos no deben asumir esquemas perfectos ni realizar lecturas ilimitadas.
 
 ---
 
@@ -1024,57 +529,34 @@ De la misma manera, las herramientas de auditoría deben tolerar registros hist�
 
 ### Contexto
 
-Durante la revisión del flujo de carga se analizó:
-
-```text
-
-src/reactiva/data/load_data.py
-
-```
+Se revisó el helper de lectura de objetos S3.
 
 ### Problema
 
-El objeto devuelto por S3 en:
-
-```python
-
-response['Body']
-
-```
-
-se estaba utilizando directamente para construir un DataFrame.
-
-Esto no interpreta correctamente el contenido del archivo CSV.
+El stream `response["Body"]` se utilizaba sin parsear correctamente el CSV.
 
 ### Causa
 
-`response['Body']` representa un stream de bytes y no una estructura tabular lista para convertirse directamente mediante `pd.DataFrame()`.
+El cuerpo de S3 es un stream de bytes, no un DataFrame.
 
 ### Solución aplicada
 
-El flujo se corrigió para:
+El flujo pasó a:
 
 ```text
-
 leer Body
-
 → decodificar UTF-8
-
 → StringIO
-
-→ pd.read_csv()
-
+→ pandas.read_csv()
 ```
 
 ### Resultado
 
-El contenido descargado desde S3 se interpreta correctamente como CSV antes de construir el DataFrame utilizado por el proyecto.
+Los objetos CSV descargados desde S3 se interpretan correctamente.
 
 ### Prevención
 
-Los objetos obtenidos desde servicios de almacenamiento deben procesarse según el formato real del archivo.
-
-Para un CSV descargado desde S3 se debe leer y decodificar el contenido antes de pasarlo al parser correspondiente.
+Procesar siempre un objeto descargado según su formato real antes de construir estructuras tabulares.
 
 ---
 
@@ -1082,93 +564,44 @@ Para un CSV descargado desde S3 se debe leer y decodificar el contenido antes de
 
 ### Contexto
 
-Durante el review del flujo individual se revisaron la identificación de clientes existentes, la generación de clientes nuevos y el comportamiento frente a reruns o doble ejecución.
+Se revisó el flujo de clientes existentes, clientes nuevos y reruns de Streamlit.
 
 ### Problema
 
-Se identificaron tres riesgos:
+Existían riesgos de:
 
-- resolver clientes existentes utilizando silenciosamente la primera fila encontrada;
-
-- generar un nuevo `PENDING-UUID` ante cada rerun de Streamlit;
-
-- registrar dos veces una misma operación por doble clic o segunda ejecución.
+- resolver identidades usando la primera fila encontrada;
+- regenerar `PENDING-UUID`;
+- registrar dos veces una venta.
 
 ### Causa
 
-`Customer Full Name` no garantiza por sí solo una identidad única.
-
-Además, Streamlit ejecuta nuevamente el script frente a diferentes interacciones, por lo que los identificadores creados directamente durante cada ejecución pueden cambiar si no se conservan en el estado de sesión.
+El nombre no es una identidad única y Streamlit vuelve a ejecutar el script frente a interacciones.
 
 ### Solución aplicada
 
-Para clientes existentes:
+Para clientes existentes se utiliza `Customer ID` como identidad final.
+
+Para clientes nuevos se conserva durante la operación:
 
 ```text
-
-nombre
-
-→ buscar Customer ID asociados
-
-→ si hay más de uno, seleccionar Customer ID exacto
-
-→ recuperar datos del perfil
-
-→ confirmar email
-
-```
-
-Los valores históricos de:
-
-```text
-
-Age
-
-Gender
-
-Location
-
-Customer Email
-
-```
-
-se obtienen utilizando el valor válido más reciente y se advierten inconsistencias cuando corresponda.
-
-Para clientes nuevos, el:
-
-```text
-
 PENDING-UUID
-
+Transaction ID
 ```
 
-permanece estable durante toda la operación.
+en estado de sesión.
 
-También se mantiene estable el `Transaction ID` de la operación y se bloquea una segunda ejecución de la misma venta dentro de la sesión.
+También se incorporaron defensas frente a doble ejecución.
 
 ### Resultado
 
-El flujo deja de resolver identidades ambiguas mediante `.iloc[0]`.
-
-Un mismo cliente nuevo conserva el mismo `PENDING-UUID` durante la operación y un doble submit no debe generar una segunda transacción.
-
-La conversión:
-
-```text
-
-PENDING-UUID → CUSTXXXXXX
-
-```
-
-queda fuera de este PR y será responsabilidad de un consolidador nocturno desarrollado en una Issue separada.
+Las identidades y transacciones permanecen estables durante una operación.
 
 ### Prevención
 
-Los campos descriptivos no deben reemplazar silenciosamente identificadores únicos.
+No usar campos descriptivos como sustituto de identificadores únicos.
 
-Los identificadores necesarios durante una operación de Streamlit deben mantenerse en estado de sesión cuando deban sobrevivir a reruns.
-
-Las operaciones de escritura deben diseñarse para tolerar reintentos sin generar duplicados lógicos.
+Las escrituras deben ser idempotentes frente a reintentos.
 
 ---
 
@@ -1176,144 +609,32 @@ Las operaciones de escritura deben diseñarse para tolerar reintentos sin genera
 
 ### Contexto
 
-La carga masiva representa actualmente el ingreso manual de ventas provenientes del e-commerce mientras no exista una integración directa mediante API.
+La carga masiva representa ventas Online incorporadas manualmente.
 
 ### Problema
 
-Una carga podía superar la validación general del DataFrame sin cumplir reglas transaccionales necesarias para ser incorporada a staging.
+Un DataFrame podía superar controles generales sin cumplir reglas transaccionales específicas del batch.
 
-También existía riesgo de reutilizar el resultado validado de un archivo anterior después de seleccionar otro archivo.
-
-### Causa
-
-Las reglas generales de calidad de datos no sustituyen las reglas específicas del flujo batch.
-
-Además, Streamlit puede conservar información calculada previamente dentro de la sesión.
+También podía reutilizarse accidentalmente el resultado validado de un archivo anterior.
 
 ### Solución aplicada
 
-Antes de permitir una carga se verifica:
+Antes de persistir se valida:
 
 - `Transaction ID` presente;
-
-- `Transaction ID` no vacío;
-
-- ausencia de `Transaction ID` duplicados dentro del mismo archivo;
-
-- ausencia de `Transaction ID` ya presentes en el dataset canónico;
-
-- canal `Online` válido;
-
-- validación antes de la escritura en S3.
-
-Un archivo idéntico no debe procesarse nuevamente como una nueva carga dentro de la misma operación.
-
-Cuando cambia el archivo cargado, se invalida el `df_clean` correspondiente al archivo anterior y el nuevo archivo debe volver a validarse.
+- ID no vacío;
+- ausencia de IDs duplicados en el archivo;
+- ausencia de IDs ya presentes en el dataset canónico;
+- canal `Online`;
+- correspondencia entre archivo cargado y resultado validado.
 
 ### Resultado
 
-El flujo batch queda condicionado a reglas de integridad transaccional y canal antes de escribir en:
-
-```text
-
-staging/batch/
-
-```
-
-La reconciliación global contra todos los objetos existentes en staging no se implementa en este PR.
-
-Esa responsabilidad corresponde al futuro consolidador nocturno.
+El batch queda condicionado a reglas transaccionales antes de escribir en `staging/batch/`.
 
 ### Prevención
 
-Toda fuente batch debe validar no solamente estructura y tipos, sino también:
-
-- identidad de transacciones;
-
-- unicidad;
-
-- canal de origen;
-
-- reintentos;
-
-- relación entre el archivo seleccionado y el resultado validado.
-
-Las responsabilidades del flujo de ingreso y de la consolidación nocturna deben mantenerse separadas.
-
----
-
-## 2026-08-31 - Ejecución mensual del recomendador dependía de la fecha máxima del dataset
-
-### Contexto
-
-Durante la implementación de la Issue #60 se preparó el proceso mensual de reactivación para ejecutar Gradient Boosting con una fecha de referencia explícita correspondiente al mes de campaña.
-
-### Problema
-
-La función canónica:
-
-```python
-recommend_user_based_inactive_customers()
-```
-
-calculaba la inactividad utilizando siempre la fecha máxima disponible en `Purchase Date`.
-
-Además, el flujo existente persistía automáticamente las predicciones en la salida histórica configurada, aun cuando el proceso mensual solo necesitara obtener el DataFrame resultante para construir la campaña vigente.
-
-Esto dificultaba ejecutar el proceso de forma reproducible respecto de una fecha mensual concreta y separar la salida mensual de mecanismos históricos de persistencia.
-
-### Causa
-
-La función había sido construida originalmente para trabajar tomando como referencia el propio dataset y conservar su comportamiento de persistencia anterior.
-
-El servicio mensual de campañas requiere, en cambio:
-
-- una fecha de referencia explícita;
-- no utilizar transacciones posteriores a esa fecha;
-- poder obtener las recomendaciones sin escribir automáticamente en una salida histórica no correspondiente a la campaña mensual.
-
-### Solución aplicada
-
-Se incorporaron dos parámetros opcionales:
-
-```python
-reference_date=None
-persist_predictions=True
-```
-
-`reference_date` permite calcular el corte de inactividad respecto de una fecha de campaña determinada.
-
-Antes de calcular el corte se conservan únicamente las transacciones con:
-
-```text
-Purchase Date <= reference_date
-```
-
-`persist_predictions` mantiene por defecto el comportamiento anterior, pero permite que el orquestador mensual solicite solamente el DataFrame resultante sin escribir en la persistencia histórica.
-
-Los valores por defecto preservan la compatibilidad con consumidores existentes.
-
-### Resultado
-
-El recomendador mensual pudo ejecutarse de forma reproducible para la referencia:
-
-```text
-2026-09-01
-```
-
-La ejecución real utilizada durante la validación produjo recomendaciones mensuales para:
-
-```text
-1.187 clientes inactivos
-```
-
-sin reutilizar recomendaciones de meses anteriores.
-
-### Prevención
-
-Los procesos temporales deben recibir una fecha de referencia explícita cuando su resultado dependa del momento de ejecución.
-
-Las funciones reutilizables deben separar, cuando sea posible, el cálculo de resultados de su persistencia para evitar efectos secundarios no deseados en procesos automatizados.
+Las validaciones de calidad general no reemplazan las reglas específicas de cada flujo de ingesta.
 
 ---
 
@@ -1321,270 +642,563 @@ Las funciones reutilizables deben separar, cuando sea posible, el cálculo de re
 
 ### Contexto
 
-Durante la validación real del sistema de cupones de la Issue #60 se leyó desde S3 el archivo:
+Los campos de redención de `campaign_active.csv` estaban inicialmente vacíos.
 
-```text
-campaigns/campaign_active.csv
-```
+### Problema
 
-Los campos de seguimiento del consumo del cupón se encontraban inicialmente vacíos:
+Pandas podía inferir como `float64` columnas que posteriormente debían recibir texto:
 
 ```text
 Coupon Redeemed At
 Coupon Transaction ID
 ```
 
-### Problema
-
-Al intentar registrar el uso de un cupón, Pandas generaba un error de tipo al asignar texto sobre esas columnas.
-
-La transacción de venta podía quedar registrada correctamente, pero la actualización del estado del cupón fallaba.
+Al intentar registrar la redención aparecía un error de tipo.
 
 ### Causa
 
-Cuando una columna CSV contiene únicamente valores vacíos, Pandas puede inferirla como:
-
-```text
-float64
-```
-
-En este caso, las columnas destinadas a almacenar posteriormente una fecha en formato texto y un `Transaction ID` fueron interpretadas como columnas numéricas.
-
-La asignación posterior de cadenas de texto sobre esas columnas producía un error de tipo.
+Una columna CSV completamente vacía no aporta información suficiente para que Pandas infiera que luego almacenará strings.
 
 ### Solución aplicada
 
-Dentro de:
-
-```python
-redeem_coupon()
-```
-
-se trabaja sobre una copia del DataFrame y se convierten explícitamente las columnas de seguimiento a tipo `object` antes de asignar los nuevos valores:
-
-```python
-updated_df["Coupon Redeemed At"] = (
-    updated_df["Coupon Redeemed At"].astype("object")
-)
-
-updated_df["Coupon Transaction ID"] = (
-    updated_df["Coupon Transaction ID"].astype("object")
-)
-```
-
-La conversión se realiza únicamente sobre la copia utilizada para producir el resultado actualizado.
+Antes de escribir los nuevos valores, las columnas de seguimiento se convierten explícitamente a `object` dentro de la copia actualizada del DataFrame.
 
 ### Resultado
 
-El cupón pudo marcarse correctamente como:
+El cupón pudo marcarse como:
 
 ```text
 REDEEMED
 ```
 
-y asociarse al `Transaction ID` de la venta.
-
-Se incorporaron pruebas específicas de regresión para reproducir el comportamiento de tipos observado al leer desde S3.
-
-La suite del subsistema de campañas finalizó con:
-
-```text
-116 tests ejecutados
-116 tests correctos
-```
+y asociarse a la transacción correspondiente.
 
 ### Prevención
 
-Los campos CSV que comienzan completamente vacíos pero posteriormente almacenarán texto no deben depender exclusivamente de la inferencia automática de tipos.
-
-Cuando un proceso vaya a escribir cadenas sobre columnas inicialmente vacías, debe normalizar explícitamente su tipo o definir el esquema esperado antes de realizar la asignación.
-
-También deben existir pruebas que reproduzcan los tipos reales obtenidos después de leer la información desde S3.
+Las columnas inicialmente vacías que posteriormente almacenarán timestamps o texto deben normalizar su dtype explícitamente.
 
 ---
 
-## 2026-08-31 - Un fallo posterior en el cupón podía interrumpir el flujo de Streamlit después de registrar la venta
+## 2026-08-31 - Un fallo posterior en el cupón podía detener Streamlit después de registrar la venta
 
 ### Contexto
 
-Durante una simulación del flujo completo de la Issue #60 se registró una venta desde Streamlit utilizando un cupón de campaña.
-
-El orden operativo es:
-
-```text
-validar cupón
-→ registrar venta
-→ confirmar persistencia de la venta
-→ registrar consumo del cupón
-→ continuar con el flujo posterior de Streamlit
-```
+La venta se registra antes de persistir definitivamente el consumo del cupón.
 
 ### Problema
 
-Si la venta ya había sido registrada correctamente pero se producía una excepción técnica al persistir el consumo del cupón, el flujo ejecutaba:
-
-```python
-st.stop()
-```
-
-Esto detenía toda la ejecución de Streamlit.
-
-Como consecuencia, un fallo secundario del subsistema de cupones podía impedir que se mostraran las recomendaciones Item-to-Item posteriores a una venta Offline que ya había sido registrada correctamente.
-
-Al retirar únicamente `st.stop()` aparecía además otro riesgo: si la excepción ocurría antes de asignar el resultado de `redeem_coupon_from_s3()`, el código posterior podía intentar utilizar una variable todavía no inicializada.
+Si la venta ya estaba confirmada y luego fallaba el registro del cupón, `st.stop()` detenía también las responsabilidades posteriores del flujo.
 
 ### Causa
 
-El manejo de errores no diferenciaba correctamente entre:
-
-- una validación de cupón fallida antes de registrar la venta;
-- un fallo técnico posterior, cuando la venta ya estaba confirmada.
-
-En el segundo caso no corresponde tratar el error como si toda la operación comercial hubiera fallado.
+El manejo de errores no distinguía una validación previa a la venta de un fallo técnico posterior a una escritura ya confirmada.
 
 ### Solución aplicada
 
-Se mantuvieron los cortes de ejecución para los errores de validación previos a la venta.
-
-Para el fallo técnico posterior al registro se ajustó el flujo de manera que:
+Se inicializa defensivamente:
 
 ```python
 coupon_redemption = None
 ```
 
-se inicialice antes del intento de persistencia.
+y un fallo posterior del cupón:
 
-Si la persistencia del cupón falla:
+- se informa;
+- se registra;
+- conserva el `Transaction ID`;
+- permite reintento idempotente;
+- no detiene el resto del flujo.
 
-- se informa el error al operador;
-- se registra el evento en logs;
-- se conserva el mismo `Transaction ID` para permitir un reintento idempotente;
-- no se detiene el resto de Streamlit.
+### Resultado
 
-El resultado del servicio solamente se procesa cuando:
+Una venta confirmada puede continuar con la recomendación Item-to-Item aunque el subsistema de cupón necesite un reintento.
 
-```python
-coupon_redemption is not None
+### Prevención
+
+Los errores posteriores a una persistencia exitosa deben aislarse según la responsabilidad que falló.
+
+---
+
+## 2026-08-31 / 2026-09-02 - Restricciones de AWS por Permissions Boundary
+
+### Contexto
+
+Durante el desarrollo local no todos los integrantes disponían de permisos para administrar ECR, Lambda, EventBridge, SES o configuraciones relacionadas.
+
+### Problema
+
+La identidad AWS utilizada durante parte del desarrollo no podía ejecutar las operaciones necesarias para completar el despliegue.
+
+### Causa
+
+Existía una `Permissions Boundary` que limitaba los permisos efectivos.
+
+Agregar una policy adicional al usuario no podía superar esa boundary.
+
+### Solución aplicada
+
+No se intentó eludir la restricción.
+
+Se separaron responsabilidades:
+
+```text
+desarrollo y validación local
+→ integrante que desarrolla
+
+despliegue y configuración AWS
+→ integrante autorizado
+```
+
+El despliegue final se continuó desde una identidad con permisos suficientes.
+
+La arquitectura vigente de campañas ya no incluye la Lambda redundante `monthly_recommendations`.
+
+Los componentes relevantes del cierre incluyen, entre otros:
+
+```text
+monthly_campaign
+campaign_sender
+unsubscribe
+evidently_drift
+consolidator
 ```
 
 ### Resultado
 
-El flujo queda preparado para que una venta ya confirmada continúe con las responsabilidades posteriores de Streamlit aunque el registro del cupón requiera reintento.
+La restricción quedó tratada como un problema de infraestructura/permisos, no como un fallo funcional del código.
 
-La aplicación compila correctamente después del ajuste mediante:
-
-```bash
-python -m py_compile app/app.py
-```
-
-La lógica de validación previa del cupón continúa bloqueando correctamente una operación cuando el cupón no corresponde al cliente, mes o producto.
+Los componentes pudieron continuar su configuración y validación en AWS por el integrante autorizado.
 
 ### Prevención
 
-Los errores posteriores a una escritura confirmada deben manejarse según la responsabilidad que falló y no invalidar silenciosamente operaciones que ya fueron persistidas.
-
-Cuando una variable depende del resultado de una llamada que puede lanzar una excepción, debe inicializarse de forma defensiva antes del `try` o procesarse únicamente dentro del camino exitoso.
-
-Los reintentos de operaciones parcialmente completadas deben conservar identificadores estables para evitar duplicados.
+Antes de una tarea de infraestructura, comprobar permisos efectivos sobre los servicios necesarios y verificar también las Permissions Boundaries aplicables.
 
 ---
 
-## 2026-08-31 - Despliegue de campañas en AWS bloqueado por Permissions Boundary
+## 2026-09-01 - Campañas ejecutaban nuevamente el recomendador y generaban una segunda salida
 
 ### Contexto
 
-Después de completar el desarrollo local de la Issue #60 se intentó comenzar el despliegue de las nuevas Lambdas containerizadas y de la infraestructura asociada en AWS.
+Después de integrar inicialmente el subsistema de campañas se revisó la conexión entre el recomendador y `monthly_campaign`.
 
-La región configurada es:
+### Problema
+
+La primera integración permitía que campañas volviera a ejecutar Gradient Boosting y generara una salida mensual propia.
+
+Esto duplicaba una responsabilidad que ya pertenecía al recomendador canónico.
+
+### Causa
+
+Se había interpretado el flujo mensual como:
 
 ```text
-us-east-1
+campañas
+→ ejecutar modelo
+→ generar recomendaciones
+→ crear campaña
 ```
 
-El usuario de desarrollo utilizado fue:
+cuando la arquitectura correcta debía separar ambos sistemas.
+
+### Solución aplicada
+
+Se restauró el recomendador a su responsabilidad anterior y se modificó:
 
 ```text
-@martinhenry
+src/reactiva/campaigns/orchestrator.py
+```
+
+para consumir directamente el CSV ya producido por el recomendador.
+
+El flujo vigente quedó:
+
+```text
+recomendador
+→ CSV canónico de recomendaciones en S3
+→ orchestrator
+→ monthly_campaign
+→ campaña/cupones/envíos
+```
+
+Se eliminó completamente:
+
+```text
+artifacts/AwsLambda/monthly_recommendations/
+```
+
+porque esa Lambda volvía a ejecutar GBoost de forma redundante.
+
+También se eliminaron pruebas que pertenecían exclusivamente a esa arquitectura descartada.
+
+### Resultado
+
+Campañas dejó de entrenar o ejecutar nuevamente el modelo y pasó a consumir exclusivamente la salida canónica existente.
+
+El recommender y las campañas quedaron desacoplados.
+
+### Prevención
+
+Cada componente debe tener una única responsabilidad.
+
+Un consumidor de recomendaciones no debe volver a entrenar o ejecutar el modelo si la salida requerida ya existe como contrato entre sistemas.
+
+---
+
+## 2026-09-02 - campaign_sender falló por configuración incompleta de variables de entorno
+
+### Contexto
+
+Después del despliegue del sender en AWS se realizó una prueba controlada de la Lambda.
+
+### Problema
+
+La función llegó al código pero falló porque faltaba configuración obligatoria del servicio de mensajería.
+
+Entre las variables requeridas por el sender se encuentran:
+
+```text
+SES_SENDER_EMAIL
+UNSUBSCRIBE_BASE_URL
+UNSUBSCRIBE_SECRET
+```
+
+La Lambda `unsubscribe` requiere también:
+
+```text
+UNSUBSCRIBE_SECRET
+```
+
+### Causa
+
+Los valores son configuración de infraestructura y, deliberadamente, no están hardcodeados ni versionados en GitHub.
+
+### Solución aplicada
+
+Las variables se configuraron en el entorno de AWS.
+
+El mismo `UNSUBSCRIBE_SECRET` debe utilizarse en:
+
+```text
+campaign_sender
+unsubscribe
+```
+
+sin publicar su valor.
+
+El remitente utilizado por SES debe ser una identidad configurada/verificada en Amazon SES.
+
+### Resultado
+
+La ejecución pudo avanzar desde un problema de configuración hacia la lógica funcional del sender.
+
+### Prevención
+
+Antes de probar una Lambda desplegada, revisar una checklist de variables obligatorias por componente.
+
+Los secretos deben existir solamente en configuración segura de infraestructura, nunca en GitHub, capturas o documentación pública.
+
+---
+
+## 2026-09-02 - campaign_sender falló al escribir timestamps y errores sobre columnas float64
+
+### Contexto
+
+`campaign_active.csv` contiene columnas de seguimiento que pueden comenzar completamente vacías:
+
+```text
+Last Attempt At
+Sent At
+Reactivated At
+Last Error
 ```
 
 ### Problema
 
-AWS rechazó operaciones necesarias para inspeccionar o desplegar la infraestructura.
+Al leer el CSV, Pandas podía inferir estas columnas como `float64`.
 
-Se confirmaron errores de autorización en acciones como:
-
-```text
-ecr:DescribeRepositories
-lambda:ListFunctions
-iam:GetUser
-```
-
-Los mensajes indicaron explícitamente que ninguna Permissions Boundary permitía esas acciones.
+Posteriormente el sender intentaba almacenar timestamps ISO o texto de error y producía una incompatibilidad de dtype.
 
 ### Causa
 
-El usuario de desarrollo se encuentra limitado por una:
-
-```text
-Permissions Boundary
-```
-
-que no habilita las acciones necesarias sobre ECR, Lambda e IAM.
-
-Una policy adicional sobre el usuario no puede superar los límites definidos por esa Permissions Boundary.
+La inferencia automática de Pandas no conoce el tipo futuro de una columna que inicialmente contiene solamente valores vacíos.
 
 ### Solución aplicada
 
-No se intentó eludir la restricción de seguridad.
-
-Se separó el trabajo en dos responsabilidades:
+En:
 
 ```text
-Issue #60
-→ desarrollo funcional, integración, pruebas y documentación
+src/reactiva/campaigns/sender.py
+```
+
+después de copiar el DataFrame se normalizan esas columnas como `object` antes de realizar asignaciones:
+
+```python
+string_columns = [
+    "Last Attempt At",
+    "Sent At",
+    "Reactivated At",
+    "Last Error",
+]
+
+updated[string_columns] = (
+    updated[string_columns]
+    .astype("object")
+)
+```
+
+No se modificó la lógica de envíos ni reintentos.
+
+### Resultado
+
+El hotfix fue integrado a `main`.
+
+La Lambda actualizada pudo ejecutar el flujo sin el TypeError original.
+
+La modificación puntual se validó mediante:
+
+```bash
+python -m py_compile src/reactiva/campaigns/sender.py
+```
+
+### Prevención
+
+Los esquemas CSV con columnas inicialmente vacías deben tiparse explícitamente cuando esas columnas posteriormente recibirán texto o timestamps.
+
+---
+
+## 2026-09-02 - campaign_history.csv todavía no existía durante la primera campaña
+
+### Contexto
+
+Al preparar la página de campañas de Power BI se buscaron las fuentes disponibles en S3.
+
+### Problema
+
+La ruta:
+
+```text
+campaigns/campaign_history.csv
+```
+
+todavía no existía.
+
+### Causa
+
+La campaña vigente era el primer ciclo operativo disponible y aún no existía una campaña histórica cerrada que justificara ese archivo.
+
+En cambio sí se encontraba disponible:
+
+```text
+campaigns/campaign_active.csv
+```
+
+con el estado actual del ciclo.
+
+### Solución aplicada
+
+La página de Reactivación y Campañas se conectó a:
+
+```text
+campaign_active.csv
+```
+
+para mostrar únicamente el estado real existente.
+
+No se inventaron resultados históricos ni conversiones inexistentes.
+
+### Resultado
+
+Power BI pudo mostrar:
+
+- clientes objetivo;
+- estado de envío;
+- programación por día;
+- recomendaciones;
+- cupones;
+- reactivaciones y redenciones cuando existan.
+
+### Prevención
+
+Los consumidores BI deben tolerar que una salida histórica todavía no exista durante el primer ciclo de un proceso.
+
+No debe interpretarse un archivo ausente como cero histórico sin entender previamente el estado operativo.
+
+---
+
+## 2026-09-02 - Necesidad de sincronizar S3 con Power BI sin rutas ni conexión directa frágil
+
+### Contexto
+
+Las nuevas páginas de campañas y monitoreo necesitan archivos producidos automáticamente en S3.
+
+El proyecto Power BI debe seguir siendo portable y utilizable sin depender de Power BI Service.
+
+### Problema
+
+Mantener copias manuales de los CSV aumentaba el riesgo de mostrar información desactualizada.
+
+Una conexión directa o rutas hardcodeadas tampoco coincidían con el esquema portable adoptado por el proyecto.
+
+### Solución aplicada
+
+Se creó:
+
+```text
+scripts/refresh_bi_data.py
+```
+
+para descargar y validar desde S3:
+
+```text
+monitoring/evidently/history/drift_summary_history.csv
+monitoring/evidently/history/drift_features_history.csv
+campaigns/campaign_active.csv
+```
+
+También se creó:
+
+```text
+actualizar_dashboard.bat
+```
+
+que ejecuta el script y abre el proyecto Power BI.
+
+El flujo queda:
+
+```text
+.bat
+→ Python
+→ S3
+→ validación
+→ dashboard/data/
+→ Power BI
+→ Actualizar
+```
+
+### Resultado
+
+Se validó una sincronización completa de las tres fuentes sin errores y Power BI pudo actualizarse con los datos descargados.
+
+### Prevención
+
+Centralizar toda sincronización externa del dashboard en un proceso reproducible y validar las fuentes antes de sobrescribir los archivos locales utilizados por BI.
+
+---
+
+## 2026-09-02 - Monitoreo de drift debía quedar desacoplado del entrenamiento
+
+### Contexto
+
+Se incorporó monitoreo de data drift con Evidently sobre features agregadas del cliente.
+
+### Problema
+
+Vincular automáticamente una señal de drift con reentrenamiento o bloqueo del recomendador habría agregado una decisión operativa no validada por el proyecto.
+
+### Causa
+
+Detectar drift y decidir reentrenar son responsabilidades diferentes.
+
+Un cambio de distribución no implica por sí solo que el modelo haya perdido desempeño ni que deba bloquearse.
+
+### Solución aplicada
+
+El módulo:
+
+```text
+src/reactiva/monitoring/drift.py
+```
+
+se diseñó explícitamente desacoplado de:
+
+- entrenamiento;
+- generación de recomendaciones;
+- campañas;
+- orquestación AWS.
+
+La ejecución operativa genera outputs estructurados e históricos en S3 para análisis y Power BI.
+
+### Resultado
+
+La primera ejecución real registrada evaluó cinco features y detectó drift en una.
+
+El resumen fue:
+
+```text
+drifted_columns = 1
+total_columns = 5
+drift_share = 0.20
+dataset_drift_threshold = 0.50
+status = OK
+```
+
+La señal quedó disponible para monitoreo sin modificar automáticamente el modelo.
+
+### Prevención
+
+Toda automatización futura de reentrenamiento debe definirse como una decisión separada, con criterios adicionales y validación explícita.
+
+---
+
+## 2026-09-02 - Diferencia entre ejecución diaria del sender y clientes programados por día
+
+### Contexto
+
+Durante la configuración de AWS surgió la duda de cada cuánto debe ejecutarse `campaign_sender`.
+
+### Problema
+
+Podía confundirse la frecuencia de invocación de la Lambda con la distribución de clientes entre los días 1 a 5.
+
+### Causa
+
+La campaña asigna a cada cliente un `Scheduled Day`, pero el sender también necesita revisar reintentos que se habilitan después de 24 horas.
+
+### Solución aplicada
+
+El sender se diseñó como un proceso de ejecución diaria.
+
+En cada corrida:
+
+- carga `campaign_active.csv`;
+- procesa únicamente filas `PENDING` que estén vencidas;
+- para el primer intento exige que `Scheduled Day` coincida con el día actual;
+- para reintentos exige al menos 24 horas desde el intento anterior;
+- revalida inactividad antes de enviar.
+
+### Resultado
+
+La lógica permite mantener la distribución original de los días 1 a 5 y, al mismo tiempo, procesar reintentos sin crear un mecanismo separado.
+
+### Prevención
+
+Documentar por separado:
+
+```text
+frecuencia de ejecución del servicio
 ```
 
 y:
 
 ```text
-despliegue AWS
-→ Issue y rama separadas
-→ ejecución por un integrante con permisos autorizados
+regla de elegibilidad de cada registro
 ```
 
-Se preparó además una guía de despliegue con:
+para evitar confundir schedule de infraestructura con reglas de negocio.
 
-- ECR;
-- cuatro Lambdas de campañas;
-- Amazon SES;
-- Lambda Function URL para baja;
-- EventBridge;
-- variables de entorno;
-- permisos;
-- validación controlada.
+---
 
-### Resultado
+# Criterio de mantenimiento
 
-El código, las pruebas y las imágenes Docker locales quedaron preparados.
+Al agregar nuevos incidentes:
 
-El despliegue en AWS permanece pendiente y debe realizarse desde un usuario o rol cuya Permissions Boundary permita las acciones necesarias.
+1. documentar solamente problemas técnicos realmente observados;
+2. distinguir estado histórico de arquitectura vigente;
+3. retirar o corregir referencias a componentes eliminados;
+4. no incluir secretos, tokens, credenciales ni valores privados;
+5. indicar si una solución fue validada mediante compilación, tests o ejecución real;
+6. evitar convertir este archivo en una segunda copia del README.
 
-El bloqueo queda identificado como una restricción de infraestructura y no como un fallo del código desarrollado en la Issue #60.
+El README principal describe el estado actual de ReActiva.
 
-### Prevención
-
-Antes de comenzar una tarea que incluya despliegue de infraestructura se deben validar de forma temprana los permisos efectivos del usuario sobre los servicios involucrados.
-
-Para este tipo de arquitectura deben comprobarse, según corresponda, permisos sobre:
-
-```text
-ECR
-Lambda
-EventBridge
-SES
-IAM PassRole
-Lambda Function URL
-S3
-```
-
-Cuando exista una Permissions Boundary, debe verificarse que esa boundary permita las acciones requeridas; agregar únicamente policies al usuario puede no ser suficiente.
+Este documento conserva los problemas encontrados y las decisiones técnicas que permiten entender cómo se llegó a ese estado.

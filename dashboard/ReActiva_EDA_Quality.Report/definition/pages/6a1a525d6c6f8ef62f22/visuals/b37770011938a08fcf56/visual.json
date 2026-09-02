@@ -4,10 +4,10 @@
   "position": {
     "x": 627.9523497840031,
     "y": 675.00353449404372,
-    "z": 9,
+    "z": 8000,
     "height": 387.26744338264172,
     "width": 627.9523497840031,
-    "tabOrder": 9
+    "tabOrder": 8000
   },
   "visual": {
     "visualType": "columnChart",
@@ -338,6 +338,19 @@
               "expr": {
                 "Literal": {
                   "Value": "19D"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "background": [
+        {
+          "properties": {
+            "transparency": {
+              "expr": {
+                "Literal": {
+                  "Value": "100D"
                 }
               }
             }

@@ -4,10 +4,10 @@
   "position": {
     "x": 1361.9508423059315,
     "y": 3.6193219007723525,
-    "z": 3,
+    "z": 2000,
     "height": 99.5313522712397,
     "width": 428.88964524152374,
-    "tabOrder": 3
+    "tabOrder": 2000
   },
   "visual": {
     "visualType": "slicer",
@@ -278,26 +278,28 @@
             }
           }
         }
+      ],
+      "background": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "transparency": {
+              "expr": {
+                "Literal": {
+                  "Value": "100D"
+                }
+              }
+            }
+          }
+        }
       ]
     },
     "drillFilterOtherVisuals": true
-  },
-  "filterConfig": {
-    "filters": [
-      {
-        "name": "39c2beac4b70fb9f5167",
-        "field": {
-          "Column": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "DimCliente"
-              }
-            },
-            "Property": "activity_status"
-          }
-        },
-        "type": "Categorical"
-      }
-    ]
   }
 }

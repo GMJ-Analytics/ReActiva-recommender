@@ -1,0 +1,38 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.12.0/schema.json",
+  "name": "67b3be4c1deb862b0bb0",
+  "position": {
+    "x": 32.573897106951172,
+    "y": 1011.6004712658726,
+    "z": 7000,
+    "height": 68.767116114674693,
+    "width": 1874.8087446000786,
+    "tabOrder": 7000
+  },
+  "visual": {
+    "visualType": "textbox",
+    "objects": {
+      "general": [
+        {
+          "properties": {
+            "paragraphs": [
+              {
+                "textRuns": [
+                  {
+                    "value": "El sistema monitorea diariamente las cinco features utilizadas por el modelo. En la última corrida detectó drift en una de cinco variables, un 20%, por debajo del umbral global del 50%, por eso el estado general permanece OK.”",
+                    "textStyle": {
+                      "fontSize": "16pt",
+                      "color": "#4b5563"
+                    }
+                  }
+                ],
+                "horizontalTextAlignment": "center"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "drillFilterOtherVisuals": true
+  }
+}

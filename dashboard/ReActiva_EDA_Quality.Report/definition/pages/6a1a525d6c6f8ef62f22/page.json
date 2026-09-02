@@ -18,6 +18,23 @@
           }
         }
       }
+    ],
+    "background": [
+      {
+        "properties": {
+          "color": {
+            "solid": {
+              "color": {
+                "expr": {
+                  "Literal": {
+                    "Value": "'#EAEAEA'"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
     ]
   }
 }

@@ -1,0 +1,6 @@
+run_id,evaluated_at_utc,column,drift_score,drift_method,drift_threshold,drift_detected,source_max_date,reference_start,reference_end,current_start,current_end,window_days
+drift_20260902T051417Z_282ddf87,2026-09-02T05:14:17.370475+00:00,days_since_last_purchase,0.6473487254963721,Wasserstein distance (normed),0.1,True,2026-08-31,2026-03-04,2026-06-02,2026-06-02,2026-08-31,90
+drift_20260902T051417Z_282ddf87,2026-09-02T05:14:17.370475+00:00,cat_count_Accessories,0.025033951630624544,Jensen-Shannon distance,0.1,False,2026-08-31,2026-03-04,2026-06-02,2026-06-02,2026-08-31,90
+drift_20260902T051417Z_282ddf87,2026-09-02T05:14:17.370475+00:00,cat_count_Clothing,0.06184687204686739,Jensen-Shannon distance,0.1,False,2026-08-31,2026-03-04,2026-06-02,2026-06-02,2026-08-31,90
+drift_20260902T051417Z_282ddf87,2026-09-02T05:14:17.370475+00:00,cat_count_Footwear,0.03589160293193941,Jensen-Shannon distance,0.1,False,2026-08-31,2026-03-04,2026-06-02,2026-06-02,2026-08-31,90
+drift_20260902T051417Z_282ddf87,2026-09-02T05:14:17.370475+00:00,total_purchases,0.06244087468913639,Jensen-Shannon distance,0.1,False,2026-08-31,2026-03-04,2026-06-02,2026-06-02,2026-08-31,90

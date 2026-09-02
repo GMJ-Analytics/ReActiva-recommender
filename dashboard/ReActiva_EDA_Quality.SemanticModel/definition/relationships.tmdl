@@ -20,3 +20,113 @@ relationship c63a5248-95ad-d3ee-2d1d-f940ab07d3fd
 	fromColumn: FactTransacciones.'Purchase Date'
 	toColumn: DimFecha.date
 
+relationship e97ee298-e798-4b08-b216-9ab5d216b030
+	joinOnDateBehavior: datePartOnly
+	fromColumn: DimFecha.date
+	toColumn: LocalDateTable_bfe2907f-e45e-42d2-a30e-d96145aab140.Date
+
+relationship c1542dc5-00b8-434b-8a57-2a28b7c78ebf
+	joinOnDateBehavior: datePartOnly
+	fromColumn: CalidadResumen.dataset_min_date
+	toColumn: LocalDateTable_796a13bd-6509-43f1-b51b-8f21d3d834ad.Date
+
+relationship 70f08c40-32c8-4524-b445-d5c36ddcc21d
+	joinOnDateBehavior: datePartOnly
+	fromColumn: CalidadResumen.dataset_max_date
+	toColumn: LocalDateTable_19037578-8b9d-4ad9-90f4-c0aeab1f453f.Date
+
+relationship da420794-095f-4c2d-b32f-4f41ed9f1537
+	joinOnDateBehavior: datePartOnly
+	fromColumn: drift_summary_history.evaluated_at_utc
+	toColumn: LocalDateTable_2a0f7461-6413-4662-b506-5a81dc192805.Date
+
+relationship 8b29455a-713c-4e82-a870-e056160bd070
+	joinOnDateBehavior: datePartOnly
+	fromColumn: drift_summary_history.source_max_date
+	toColumn: LocalDateTable_4655e21d-f626-4067-9c0b-13abc94cc405.Date
+
+relationship 23269ca5-f7e5-45cc-b116-8f261963a3d4
+	joinOnDateBehavior: datePartOnly
+	fromColumn: drift_summary_history.reference_start
+	toColumn: LocalDateTable_f07d9a77-4151-41c3-adeb-936a31d4f746.Date
+
+relationship ce1690e6-da26-4e8e-8d48-51ecaea2605f
+	joinOnDateBehavior: datePartOnly
+	fromColumn: drift_summary_history.reference_end
+	toColumn: LocalDateTable_8bdd57de-9ba9-41e7-a9db-9bf5090fe3a9.Date
+
+relationship 80ff0d38-ec6f-40fd-a95b-cdc0cca41d1b
+	joinOnDateBehavior: datePartOnly
+	fromColumn: drift_summary_history.current_start
+	toColumn: LocalDateTable_dd91f5d0-7ee3-4743-8da0-21895384bbc3.Date
+
+relationship c631c945-e744-4f97-a58b-953aab6978c1
+	joinOnDateBehavior: datePartOnly
+	fromColumn: drift_summary_history.current_end
+	toColumn: LocalDateTable_462f2920-1d79-4352-a04d-aaf94957270d.Date
+
+relationship 7d459814-de80-4e5a-a1d6-cbfc9e82f82b
+	joinOnDateBehavior: datePartOnly
+	fromColumn: drift_features_history.evaluated_at_utc
+	toColumn: LocalDateTable_8507e52a-bbd1-4a47-8377-338ffb7a408a.Date
+
+relationship f78eeea0-2535-47a0-9adf-505d7bfc8d5b
+	joinOnDateBehavior: datePartOnly
+	fromColumn: drift_features_history.source_max_date
+	toColumn: LocalDateTable_4727e206-ae7f-4994-8062-28574252292d.Date
+
+relationship 65755f22-6497-4934-b56f-82ce5499fb32
+	joinOnDateBehavior: datePartOnly
+	fromColumn: drift_features_history.reference_start
+	toColumn: LocalDateTable_16efe80a-67ee-45df-bb12-a1ed83e21612.Date
+
+relationship 7e9044e5-9530-4879-8479-968ab0e5e008
+	joinOnDateBehavior: datePartOnly
+	fromColumn: drift_features_history.reference_end
+	toColumn: LocalDateTable_4365a585-b1cb-450e-939f-a0783c67424c.Date
+
+relationship 96417adf-5d8e-4cfb-b442-a43022309161
+	joinOnDateBehavior: datePartOnly
+	fromColumn: drift_features_history.current_start
+	toColumn: LocalDateTable_1347c866-8470-4737-90f8-ad9466fa221e.Date
+
+relationship 5c800594-f74e-4ae0-b15a-e2ef40365751
+	joinOnDateBehavior: datePartOnly
+	fromColumn: drift_features_history.current_end
+	toColumn: LocalDateTable_80a4290e-5bf1-48ca-9737-3965eef93eb9.Date
+
+relationship AutoDetected_03975e4c-b3b9-4086-8c8c-67949b3e067b
+	fromColumn: drift_features_history.run_id
+	toColumn: drift_summary_history.run_id
+
+relationship c988b5a8-dae2-4067-b247-be7c533b8151
+	joinOnDateBehavior: datePartOnly
+	fromColumn: drift_summary_history.'Fecha Evaluacion IST'
+	toColumn: LocalDateTable_fc8f2f22-7c24-4836-939b-96dcdaf91522.Date
+
+relationship e3ef4df5-cae8-4b34-a6d3-715116d7e22a
+	joinOnDateBehavior: datePartOnly
+	fromColumn: campaign_active.'Last Attempt At'
+	toColumn: LocalDateTable_84b791a2-19cd-492c-9820-e20e9ae6ac13.Date
+
+relationship 0fd172e8-7ba3-4150-a11b-8a9b4e9e266a
+	joinOnDateBehavior: datePartOnly
+	fromColumn: campaign_active.'Sent At'
+	toColumn: LocalDateTable_9d679ec2-c23a-417a-9b5c-2be85be194cd.Date
+
+relationship 65321b85-eaca-4b42-b2ec-2a568edc5911
+	joinOnDateBehavior: datePartOnly
+	fromColumn: campaign_active.'Reactivated At'
+	toColumn: LocalDateTable_c16c3cbc-2317-4486-9b2b-d98c28eec9fc.Date
+
+relationship db54320d-c039-4eaf-8858-8aa405b4220a
+	joinOnDateBehavior: datePartOnly
+	fromColumn: campaign_active.'Coupon Redeemed At'
+	toColumn: LocalDateTable_722a01f4-641b-44a2-a4a8-850b4e4f546b.Date
+
+relationship AutoDetected_751c6c37-0639-466f-964c-111de1a05f6b
+	crossFilteringBehavior: bothDirections
+	fromCardinality: one
+	fromColumn: campaign_active.'Customer ID'
+	toColumn: DimCliente.'Customer ID'
+
