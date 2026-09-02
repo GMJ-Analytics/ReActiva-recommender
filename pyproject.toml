@@ -8,3 +8,10 @@ version = "0.1.0"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.pytest.ini_options]
+filterwarnings = [
+    "ignore:numpy\\.core is deprecated and has been renamed to numpy\\._core\\..*:DeprecationWarning:evidently\\.legacy\\.tests\\.utils",
+    "ignore:Call to deprecated function 'Dependency'\\..*:litestar.utils.deprecation.LitestarDeprecationWarning:litestar\\.utils\\.deprecation",
+    "ignore:Use of deprecated class 'DependencyKwarg'\\..*:litestar.utils.deprecation.LitestarDeprecationWarning:litestar\\.params",
+]
