@@ -3,12 +3,29 @@ import joblib
 import pandas as pd
 import boto3
 
-from reactiva.config import S3_BUCKET, DATASET_URI, LAMBDA_LOG
-from reactiva.data.load_data import cargar_datos
-from reactiva.features.build_features import build_customer_features
 from reactiva.data.validate_data import clean_and_save_dataset
 from reactiva.utils.logger import setup_logger
 from sklearn.ensemble import GradientBoostingClassifier
+
+from botocore.exceptions import ClientError
+from io import StringIO
+from reactiva.config import S3_BUCKET,API_KEY,S3_PREDICTIONS_KEY,MATRIX_UIR,LAMBDA_LOG,S3_PREDICTIONSLOG,DATASET_URI
+from reactiva.data.load_data import cargar_datos_as3,descargar_datos_des3,cargar_log_as3,cargar_datos
+from reactiva.features.build_features import build_customer_features
+from reactiva.data.save_results import generate_run_id
+from datetime import datetime
+from reactiva.utils.logger import log_event,setup_logger
+from reactiva.features.build_features import (add_season, season_from_month)
+from reactiva.features.context import (recommend_contextual_popularity)
+from pathlib import Path
+
+
+
+# ============================================================
+# ITEM-SIMILARITY MATRIX CACHE
+# ============================================================
+
+_similarity_matrix = None
 
 logger = setup_logger('model_train_log', LAMBDA_LOG)
 
@@ -163,3 +180,69 @@ if __name__ == "__main__":
         print(f"Model trained and saved to {MODEL_PATH}")
     else:
         print("Training skipped or aborted -- see logs.")
+
+def _load_similarity_matrix():
+    """
+    Load the item-similarity matrix only when it is required.
+
+    The matrix is cached after the first load so importing this
+    module does not trigger unnecessary I/O.
+    """
+
+    global _similarity_matrix
+
+    if _similarity_matrix is None:
+        _similarity_matrix = pd.read_csv(MATRIX_UIR)
+
+    return _similarity_matrix
+
+# ============================================================
+# ITEM-BASED RECOMMENDATIONS
+# ============================================================
+
+def get_recommendations_items(
+    trigger_item,
+    top_n=5,
+):
+    """
+    Return the most similar products for a trigger item.
+
+    The item-similarity matrix is loaded lazily on first use
+    instead of during module import.
+    """
+
+    similarity = _load_similarity_matrix()
+
+    # Check whether the trigger exists in the Items column
+
+    if trigger_item not in similarity["Items"].values:
+        return []
+
+    # Get the row corresponding to the trigger item
+
+    scores = similarity.loc[
+        similarity["Items"] == trigger_item
+    ].iloc[0]
+
+    # Remove the Items label
+
+    scores = scores.drop("Items")
+
+    # Remove zero similarities
+
+    scores = scores[
+        scores > 0
+    ]
+
+    # Highest similarity first
+
+    scores_filter = scores.sort_values(
+        ascending=False
+    )
+
+    return (
+        scores_filter
+        .head(top_n)
+        .index
+        .tolist()
+    )
