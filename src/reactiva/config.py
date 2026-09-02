@@ -12,11 +12,11 @@ S3_BUCKET = os.getenv("S3_BUCKET")
 
 # ACCESO files
 MATRIX_UIR = os.getenv('MATRIX_URI')
-S3_PREDICTIONS_KEY = os.getenv('S3_PREDICTIOSKEY')
+S3_PREDICTIONS_KEY = os.getenv('S3_PREDICTIONSKEY')
 
 # Configuraciones que podrán utilizarse más adelante.
 AWS_REGION = os.getenv("AWS_REGION")
-API_KEY = os.getenv("API_KEY")
+API_KEY = os.getenv("API_KEY") 
 
 #CREDNETIALS
 USUARIO_ADMIN = os.getenv('USUARIO_ADMIN')
